@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pushx"
+version = "0.1.0"
+description = "PushT-style manipulation environments in JAX."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+authors = [
+  { name = "huterguier", email = "huterguier@gmail.com" }
+]
+dependencies = [
+    "jax",
+    "chex",
+    "gxm>=0.4.0",
+    "matplotlib",
+    "jax2d",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda]"]
+
+[project.urls]
+Homepage = "https://github.com/huterguier/pushx"
+
+[tool.setuptools.packages.find]
+include = ["pushx", "pushx.*"]
+exclude = ["images"]
