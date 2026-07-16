@@ -35,6 +35,21 @@ def potential_shaping(pos_weight: float = 1.0, angle_weight: float = 1.0) -> Rew
     return reward_fn
 
 
+def pusher_approach(weight: float = 0.5) -> RewardFn:
+    """Potential-based shaping on the pusher-to-assembly distance.
+
+    Without this term the agent gets no signal until it happens to move the
+    assembly, which makes exploration from scratch (e.g. PPO) extremely slow.
+    """
+
+    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
+        prev = jnp.linalg.norm(env.pusher_position(state) - env.assembly_position(state))
+        curr = jnp.linalg.norm(env.pusher_position(new_state) - env.assembly_position(new_state))
+        return weight * (prev - curr)
+
+    return reward_fn
+
+
 def step_penalty(penalty: float = 0.01) -> RewardFn:
     def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
         return -jnp.float32(penalty)
