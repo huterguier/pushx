@@ -44,6 +44,9 @@ class PushEnv(Environment[PushState]):
     def pusher_position(self, state: PushState) -> jnp.ndarray:
         return state.sim_state.circle.position[self._model._pusher_idx]
 
+    def assembly_position(self, state: PushState) -> jnp.ndarray:
+        return state.sim_state.polygon.position[self._model._stroke_indices[0]]
+
     def init(self, key: Key) -> tuple[PushState, Timestep]:
         state, step = self._model.init(key)
         return state, Timestep(
