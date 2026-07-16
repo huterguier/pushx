@@ -36,7 +36,7 @@ env = PixelObservation(
 step_jit = jax.jit(env.step)
 reset_jit = jax.jit(env.reset)
 
-key = jax.random.PRNGKey(0)
+key = jax.random.key(0)
 state, timestep = env.init(key)
 step_count = 0
 action_index = 0  # currently held direction; 0 = stay

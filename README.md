@@ -25,14 +25,14 @@ import jax.numpy as jnp
 from pushx import ASSEMBLIES, PushEnv
 
 env = PushEnv(ASSEMBLIES["X"])
-key = jax.random.PRNGKey(0)
+key = jax.random.key(0)
 
 state, timestep = env.init(key)
 state, timestep = jax.jit(env.step)(key, state, jnp.array([1.0, 1.0]))
-image = env.render(state, width=64, height=64)  # (64, 64, 3) float32 in [0, 1]
+image = env.render(state, width=64, height=64)
 ```
 
-Environments can also be created through `gxm`'s registry.
+Or through `gxm`'s registry:
 ```python
 import gxm
 env = gxm.make("PushX/X")
@@ -81,6 +81,11 @@ env = AutoReset(TimeLimit(PushEnv(ASSEMBLIES["X"]), time_limit=200))
 ```bash
 python examples/play.py         # mouse-driven pusher
 python examples/play_arrows.py  # arrow-key discrete pusher
+python examples/ppo.py          # train a PPO agent (fully jit-compiled)
+```
+The PPO example uses [`rlax`](https://github.com/huterguier/rlax), which is included in the `examples` extra.
+```bash
+pip install "pushx[examples] @ git+https://github.com/huterguier/pushx"
 ```
 
 ## Installation

@@ -19,7 +19,7 @@ env = PixelObservation(PushEnv(ASSEMBLIES[SHAPE]), width=RENDER_SIZE, height=REN
 step_jit = jax.jit(env.step)
 reset_jit = jax.jit(env.reset)
 
-key = jax.random.PRNGKey(0)
+key = jax.random.key(0)
 state, timestep = env.init(key)
 step_count = 0
 
