@@ -15,7 +15,7 @@ authors = [
 dependencies = [
     "jax",
     "chex",
-    "gxm>=0.4.0",
+    "gxm@git+https://github.com/huterguier/gxm@main",
     "matplotlib",
     "jax2d",
 ]
