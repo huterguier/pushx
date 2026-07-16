@@ -26,6 +26,8 @@ classifiers = [
 
 [project.optional-dependencies]
 cuda = ["jax[cuda]"]
+tpu = ["jax[tpu]"]
+examples = ["rlax@git+https://github.com/huterguier/rlax"]
 
 [project.urls]
 Homepage = "https://github.com/huterguier/pushx"
