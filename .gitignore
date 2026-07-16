@@ -219,3 +219,7 @@ __marimo__/
 
 # Claude Code project instructions (local only, not tracked)
 CLAUDE.md
+
+# Generated PPO run artifacts (checkpoints, rollout gifs)
+examples/**/*.msgpack
+examples/**/*.gif
