@@ -28,11 +28,12 @@ from gxm.wrappers import AutoReset, TimeLimit
 from gxm.wrappers.wrapper import WrapperState
 
 from pushx import ASSEMBLIES, PushEnv, rewards
-from pushx.wrappers import RelativeAction
+from pushx.wrappers import ActionRepeat, RelativeAction
 
 SHAPE = "T"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
-TIME_LIMIT = 600  # physics runs at 60 Hz, so this is 10 seconds per episode
+ACTION_REPEAT = 6  # hold each action 6 sim steps -> 10 Hz control, as PushT does
+TIME_LIMIT = 100  # in control steps; at 10 Hz this is 10 seconds per episode
 
 
 def featurize(obs):
@@ -118,7 +119,7 @@ def save_gif(env, params, network, key, path):
     plt.tight_layout()
     image = ax.imshow(frames[0], interpolation="nearest")
     anim = animation.FuncAnimation(
-        fig, lambda i: image.set_data(frames[i]), frames=len(frames), interval=1000 / 60
+        fig, lambda i: image.set_data(frames[i]), frames=len(frames), interval=1000 / (60 / ACTION_REPEAT)
     )
     anim.save(path, writer="pillow", fps=60)
     plt.close(fig)
@@ -133,7 +134,7 @@ if __name__ == "__main__":
         num_steps_rollout=64,
         num_minibatches=8,
         num_update_epochs=4,
-        gamma=0.995,
+        gamma=0.99,
         lam=0.95,
         ratio_clip=0.2,
         value_coefficient=0.5,
@@ -155,7 +156,11 @@ if __name__ == "__main__":
     )
     env = TimeLimit(
         RelativeAction(
-            PushEnv(ASSEMBLIES[SHAPE], reward_fn=reward_fn),
+            # inside RelativeAction: the absolute target is held for the whole
+            # control step, rather than the delta re-applying every sim step
+            ActionRepeat(
+                PushEnv(ASSEMBLIES[SHAPE], reward_fn=reward_fn),
+                repeat=ACTION_REPEAT),
             scale=ACTION_DELTA),
         time_limit=TIME_LIMIT,
     ).seal()

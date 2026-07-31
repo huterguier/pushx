@@ -86,6 +86,64 @@ class VelocityAction(EnvironmentWrapper[Any]):
         return state, dataclasses.replace(timestep, action=action)
 
 
+class ActionRepeat(EnvironmentWrapper[Any]):
+    """Hold one action for ``repeat`` simulation steps, lowering the control rate.
+
+    ``PushModel`` advances a single ``dt = 1/60`` step per call, so an agent acts
+    at 60 Hz and one decision spans 17 ms. That is finer than the task needs, and
+    it makes consecutive observations nearly identical — which matters when those
+    observations train a world model: one step of dynamics can fall below the
+    model's own prediction error, leaving nothing to learn or plan over.
+
+    This is the trick PushT uses (``n_steps = 1 / (dt * control_hz)`` substeps per
+    env step), without touching the physics: ``dt`` stays 1/60, so contact
+    resolution is unchanged. ``repeat=6`` gives 10 Hz control, matching PushT.
+
+    Lowering ``dt`` instead would be wrong twice over — an impulse solver degrades
+    badly at coarse steps on contact-rich pushing, and ``PushModel``'s velocity
+    gain (``* 5.0``) and per-step ``damping = 0.6`` are tuned for 1/60, so their
+    effect per unit time would silently change.
+
+    Reward is **summed** over the repeat, so episode returns keep the scale they
+    had at 60 Hz. Everything else — ``terminated``, ``truncated``, ``next_obs``,
+    ``info`` — comes from the final step, so success is judged once per control
+    step, on a state the agent actually observes.
+
+    Place this directly on ``PushEnv``, inside any action-space wrapper::
+
+        RelativeAction(ActionRepeat(PushEnv(assembly), repeat=6), scale=0.5)
+
+    Outside ``RelativeAction`` the delta would re-apply from each updated pusher
+    position and the pusher would travel ``repeat`` times too far; inside, the
+    absolute target is held for the whole control step, as PushT holds its target
+    across substeps.
+    """
+
+    def __init__(self, wrapped: PushEnv | EnvironmentWrapper, repeat: int = 6):
+        super().__init__(wrapped)
+        if repeat < 1:
+            raise ValueError(f'repeat must be >= 1, got {repeat}')
+        self.repeat = repeat
+
+    def init(self, key: Key) -> tuple[PushState, Timestep]:
+        return self.wrapped.init(key)
+
+    def reset(self, key: Key, state: PushState) -> tuple[PushState, Timestep]:
+        return self.wrapped.reset(key, state)
+
+    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+        def one(carry, step_key):
+            state, total = carry
+            state, timestep = self.wrapped.step(step_key, state, action)
+            return (state, total + timestep.reward), timestep
+
+        (state, total), timesteps = jax.lax.scan(
+            one, (state, jnp.zeros(())), jax.random.split(key, self.repeat)
+        )
+        last = jax.tree.map(lambda x: x[-1], timesteps)
+        return state, dataclasses.replace(last, reward=total.astype(last.reward.dtype))
+
+
 class PixelObservation(EnvironmentWrapper[Any]):
     """Replaces the raw-state observation with a rendered (height, width, 3) pixel image."""
 
