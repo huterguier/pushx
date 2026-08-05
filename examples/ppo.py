@@ -32,7 +32,7 @@ from pushx.wrappers import ActionRepeat, RelativeAction
 
 SHAPE = "T"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
-ACTION_REPEAT = 6  # hold each action 6 sim steps -> 10 Hz control, as PushT does
+ACTION_REPEAT = 10  # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
 TIME_LIMIT = 100  # in control steps; at 10 Hz this is 10 seconds per episode
 
 
@@ -119,7 +119,7 @@ def save_gif(env, params, network, key, path):
     plt.tight_layout()
     image = ax.imshow(frames[0], interpolation="nearest")
     anim = animation.FuncAnimation(
-        fig, lambda i: image.set_data(frames[i]), frames=len(frames), interval=1000 / (60 / ACTION_REPEAT)
+        fig, lambda i: image.set_data(frames[i]), frames=len(frames), interval=1000 / (100 / ACTION_REPEAT)
     )
     anim.save(path, writer="pillow", fps=60)
     plt.close(fig)

@@ -64,9 +64,11 @@ class RelativeAction(EnvironmentWrapper[Any]):
 class VelocityAction(EnvironmentWrapper[Any]):
     """Actions are interpreted as a direct pusher velocity command.
 
-    PushModel.step converts its (absolute-position) action into velocity as
-    `(target_pos - pusher_pos) * 5`, clamped. Inverting that conversion here lets the
-    wrapper-facing action act as a direct velocity command with no PushModel changes needed.
+    PushModel.step now PD-tracks an absolute-position target (matching PushT's agent
+    controller), rather than mapping position error to velocity directly, so a fixed
+    target no longer gives an exact velocity. Targeting one physics step ahead in the
+    commanded direction (`pos + action * dt`) is the ramp reference a PD tracker follows
+    at constant velocity, so the pusher's actual velocity converges to `action`.
     """
 
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper, max_speed: float = 3.0):
@@ -81,7 +83,8 @@ class VelocityAction(EnvironmentWrapper[Any]):
         return self.wrapped.reset(key, state)
 
     def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
-        target_pos = cast(PushEnv, self.wrapped).pusher_position(state) + action / 5.0
+        dt = 0.01  # matches PushModel's fixed SimParams.dt
+        target_pos = cast(PushEnv, self.wrapped).pusher_position(state) + action * dt
         state, timestep = self.wrapped.step(key, state, target_pos)
         return state, dataclasses.replace(timestep, action=action)
 
@@ -89,29 +92,29 @@ class VelocityAction(EnvironmentWrapper[Any]):
 class ActionRepeat(EnvironmentWrapper[Any]):
     """Hold one action for ``repeat`` simulation steps, lowering the control rate.
 
-    ``PushModel`` advances a single ``dt = 1/60`` step per call, so an agent acts
-    at 60 Hz and one decision spans 17 ms. That is finer than the task needs, and
-    it makes consecutive observations nearly identical — which matters when those
-    observations train a world model: one step of dynamics can fall below the
-    model's own prediction error, leaving nothing to learn or plan over.
+    ``PushModel`` advances a single ``dt = 0.01`` step per call -- the same physics
+    dt PushT uses -- so an agent acting every raw step would decide at 100 Hz, far
+    finer than the task needs, and it'd make consecutive observations nearly
+    identical, which matters when those observations train a world model: one step
+    of dynamics can fall below the model's own prediction error, leaving nothing to
+    learn or plan over.
 
     This is the trick PushT uses (``n_steps = 1 / (dt * control_hz)`` substeps per
-    env step), without touching the physics: ``dt`` stays 1/60, so contact
-    resolution is unchanged. ``repeat=6`` gives 10 Hz control, matching PushT.
-
-    Lowering ``dt`` instead would be wrong twice over — an impulse solver degrades
-    badly at coarse steps on contact-rich pushing, and ``PushModel``'s velocity
-    gain (``* 5.0``) and per-step ``damping = 0.6`` are tuned for 1/60, so their
-    effect per unit time would silently change.
+    env step), without touching the physics: ``dt`` stays 0.01, so contact
+    resolution is unchanged. ``repeat=10`` gives 10 Hz control -- the same
+    ``n_steps=10`` substeps of ``dt=0.01`` PushT holds one target across, at
+    ``control_hz=10``. With identical ``dt``, identical substep count, and the same
+    PD gains, the pusher's discretized step-response now matches PushT's agent
+    controller as closely as two different solvers can get.
 
     Reward is **summed** over the repeat, so episode returns keep the scale they
-    had at 60 Hz. Everything else — ``terminated``, ``truncated``, ``next_obs``,
+    had at 100 Hz. Everything else — ``terminated``, ``truncated``, ``next_obs``,
     ``info`` — comes from the final step, so success is judged once per control
     step, on a state the agent actually observes.
 
     Place this directly on ``PushEnv``, inside any action-space wrapper::
 
-        RelativeAction(ActionRepeat(PushEnv(assembly), repeat=6), scale=0.5)
+        RelativeAction(ActionRepeat(PushEnv(assembly), repeat=10), scale=0.5)
 
     Outside ``RelativeAction`` the delta would re-apply from each updated pusher
     position and the pusher would travel ``repeat`` times too far; inside, the
@@ -119,7 +122,7 @@ class ActionRepeat(EnvironmentWrapper[Any]):
     across substeps.
     """
 
-    def __init__(self, wrapped: PushEnv | EnvironmentWrapper, repeat: int = 6):
+    def __init__(self, wrapped: PushEnv | EnvironmentWrapper, repeat: int = 10):
         super().__init__(wrapped)
         if repeat < 1:
             raise ValueError(f'repeat must be >= 1, got {repeat}')

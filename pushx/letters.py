@@ -3,18 +3,28 @@ from __future__ import annotations
 
 import math
 
+from pushx.model import SCENE_SIZE
 from pushx.shapes import Assembly, Stroke, Weld
 
 # ---------------------------------------------------------------------------
 # T  (symmetry_order=1 — asymmetric)
+#
+# Sized and positioned to match stable_worldmodel's PushT `add_tee` exactly (bar
+# 120x30px, stem 30x90px on PushT's 512px window), scaled by SCENE_SIZE/512 -- so
+# the same world position renders the same shape in both envs, modulo PushT's
+# y-down vs pushx's y-up convention (render.py flips y when rasterizing). PushT's
+# body origin sits at the bar's top edge (its local (0,0), not the bar's center),
+# so the strokes below are offset from that same reference point, not from a
+# centroid, to keep the two origins interchangeable under a straight scale+flip.
 # ---------------------------------------------------------------------------
-_BAR_W, _BAR_H = 0.40, 0.085
-_STEM_W, _STEM_H = 0.12, 0.25
+_PUSHT_PX_SCALE = SCENE_SIZE / 512.0
+_BAR_W, _BAR_H = 120.0 * _PUSHT_PX_SCALE, 30.0 * _PUSHT_PX_SCALE
+_STEM_W, _STEM_H = 30.0 * _PUSHT_PX_SCALE, 90.0 * _PUSHT_PX_SCALE
 
 T = Assembly(
     strokes=[
-        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_BAR_W, _BAR_H)),
-        Stroke(offset=(0.0, -(_BAR_H + _STEM_H) / 2), angle=0.0, size=(_STEM_W, _STEM_H)),
+        Stroke(offset=(0.0, -_BAR_H / 2), angle=0.0, size=(_BAR_W, _BAR_H)),
+        Stroke(offset=(0.0, -(_BAR_H + _STEM_H / 2)), angle=0.0, size=(_STEM_W, _STEM_H)),
     ],
     welds=[
         Weld(a=0, b=1, a_relative_pos=(0.0, -_BAR_H / 2), b_relative_pos=(0.0, _STEM_H / 2)),

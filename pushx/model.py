@@ -14,8 +14,14 @@ from jax2d.sim_state import SimParams, SimState, StaticSimParams
 from pushx.shapes import Assembly
 
 SCENE_SIZE = 2.0
-PUSHER_RADIUS = 0.065
 _N_STATIC = 4  # jax2d's num_static_fixated_polys
+
+# swm/PushT's pymunk scene lives in a 512px window; this is the scale factor that maps
+# its pixel-space geometry onto pushx's SCENE_SIZE world, so shapes sized from PushT's
+# pixel constants (see letters.py's T) and the pusher radius below land at the same
+# proportions.
+_PUSHT_PX_SCALE = SCENE_SIZE / 512.0
+PUSHER_RADIUS = 15.0 * _PUSHT_PX_SCALE  # PushT agent: base_radius=0.375 * scale=40 = 15px
 
 
 @jax.tree_util.register_dataclass
@@ -38,7 +44,7 @@ class PushModel(Dynamics[PushState, Step]):
             num_thrusters=1,
             max_polygon_vertices=4,
         )
-        self._params = SimParams(dt=1 / 60)
+        self._params = SimParams(dt=0.01)  # matches PushT's physics dt exactly (see ActionRepeat)
         self._engine = PhysicsEngine(self._static)
         self._base_sim_state, self._stroke_indices, self._pusher_idx = self._build_scene()
 
@@ -64,16 +70,53 @@ class PushModel(Dynamics[PushState, Step]):
         sim_state = sim_state.replace(gravity=jnp.zeros(2))
         center = jnp.full(2, SCENE_SIZE / 2)
 
+        # PushT bounds its arena with 4 static wall segments at its window's [5, 506]px
+        # margins (radius=2, frictionless -- see the stroke loop's friction comment).
+        # `_N_STATIC` was already reserved for exactly this; walls fill it first so
+        # strokes/joints/pusher indices are unaffected.
+        wall_lo = 5.0 * _PUSHT_PX_SCALE
+        wall_hi = 506.0 * _PUSHT_PX_SCALE
+        wall_mid = (wall_lo + wall_hi) / 2
+        wall_span = wall_hi - wall_lo
+        wall_thickness = 4.0 * _PUSHT_PX_SCALE
+        walls = [
+            (jnp.array([wall_lo, wall_mid]), jnp.array([wall_thickness, wall_span + wall_thickness])),
+            (jnp.array([wall_hi, wall_mid]), jnp.array([wall_thickness, wall_span + wall_thickness])),
+            (jnp.array([wall_mid, wall_lo]), jnp.array([wall_span + wall_thickness, wall_thickness])),
+            (jnp.array([wall_mid, wall_hi]), jnp.array([wall_span + wall_thickness, wall_thickness])),
+        ]
+        for wall_pos, wall_dims in walls:
+            sim_state, _ = add_rectangle_to_scene(
+                sim_state,
+                self._static,
+                position=wall_pos,
+                dimensions=wall_dims,
+                friction=0.0,
+                restitution=0.0,
+                fixated=True,
+            )
+
         stroke_indices = []
         for stroke in self._assembly.strokes:
             pos = center + jnp.array(stroke.offset)
+            # PushT builds each stroke as a separate pymunk Poly with mass=1 fixed
+            # (moment_for_poly(1, vertices)), regardless of the piece's area -- not a
+            # uniform-density body. Match that: give every stroke equal nominal mass
+            # by scaling density inversely with its own area (mass = density * area).
+            area = stroke.size[0] * stroke.size[1]
             sim_state, (idx, _) = add_rectangle_to_scene(
                 sim_state,
                 self._static,
                 position=pos,
                 dimensions=jnp.array(stroke.size),
                 rotation=stroke.angle,
-                friction=0.8,
+                density=1.0 / area,
+                # PushT sets `body.friction` (not `shape.friction`) on its blocks/agent/
+                # walls, which pymunk's Body has no such attribute for -- it's silently
+                # ignored, so every contact in PushT is actually frictionless (shape
+                # friction defaults to 0.0). Matched here rather than the shape.friction=1
+                # the code visually appears to ask for.
+                friction=0.0,
                 restitution=0.0,
             )
             stroke_indices.append(idx)
@@ -99,9 +142,9 @@ class PushModel(Dynamics[PushState, Step]):
             self._static,
             position=jnp.array([SCENE_SIZE * 0.7, SCENE_SIZE / 2]),
             radius=PUSHER_RADIUS,
-            density=5.0,
-            friction=0.8,
+            friction=0.0,  # PushT's agent is frictionless too -- see the stroke loop's comment above
             restitution=0.0,
+            fixated=True,  # kinematic: infinite mass, so contact can't knock the pusher off its commanded velocity
         )
 
         return sim_state, stroke_indices, pusher_idx
@@ -175,11 +218,18 @@ class PushModel(Dynamics[PushState, Step]):
         return self.init(key)  # state is ignored; full re-randomisation on every reset
 
     def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Step]:
+        # PD control toward `action` (an absolute world-space target), matching PushT's
+        # agent controller: k_p/k_v are time constants (1/s^2, 1/s) and so are independent
+        # of SCENE_SIZE's coordinate scale -- these are the same gains PushT uses on its
+        # 512px window. k_p=100, k_v=20 is critically damped (zeta = k_v / (2*sqrt(k_p)) = 1).
+        k_p, k_v = 100.0, 20.0
         pusher_pos = state.sim_state.circle.position[self._pusher_idx]
-        target_vel = jnp.clip((action - pusher_pos) * 5.0, -3.0, 3.0)
+        pusher_vel = state.sim_state.circle.velocity[self._pusher_idx]
+        accel = k_p * (action - pusher_pos) - k_v * pusher_vel
+        new_vel = pusher_vel + accel * self._params.dt
 
         circle = state.sim_state.circle.replace(
-            velocity=state.sim_state.circle.velocity.at[self._pusher_idx].set(target_vel)
+            velocity=state.sim_state.circle.velocity.at[self._pusher_idx].set(new_vel)
         )
         sim = state.sim_state.replace(circle=circle)
         new_sim, _ = self._engine.step(
@@ -188,7 +238,10 @@ class PushModel(Dynamics[PushState, Step]):
             jnp.zeros(self._static.num_joints + self._static.num_thrusters),
         )
 
-        damping = 0.6
+        # 0.6 was tuned per-step at dt=1/60 with a 6-substep (0.1s) control period; at
+        # dt=0.01 the same period now takes 10 substeps, so the per-step factor is
+        # rescaled (0.6 ** (6/10)) to keep the same total decay over one control step.
+        damping = 0.6 ** (6 / 10)
         poly = new_sim.polygon.replace(
             velocity=new_sim.polygon.velocity * damping,
             angular_velocity=new_sim.polygon.angular_velocity * damping,
