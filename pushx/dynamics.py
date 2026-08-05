@@ -23,6 +23,8 @@ _N_STATIC = 4  # jax2d's num_static_fixated_polys
 _PUSHT_PX_SCALE = SCENE_SIZE / 512.0
 PUSHER_RADIUS = 15.0 * _PUSHT_PX_SCALE  # PushT agent: base_radius=0.375 * scale=40 = 15px
 
+from pushx.render import _render_pixels  # noqa: E402
+
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -258,5 +260,4 @@ class PushDynamics(Dynamics[PushState, Step]):
         )
 
     def render(self, state: PushState, width: int = 64, height: int = 64) -> jnp.ndarray:
-        from pushx.render import _render_pixels
         return _render_pixels(state, self._assembly, self._stroke_indices, self._pusher_idx, width, height)
