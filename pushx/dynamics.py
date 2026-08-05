@@ -32,7 +32,7 @@ class PushState(DynamicsState):
     goal_angle: jnp.ndarray  # ()
 
 
-class PushModel(Dynamics[PushState, Step]):
+class PushDynamics(Dynamics[PushState, Step]):
     def __init__(self, assembly: Assembly):
         self._assembly = assembly
         n_strokes = len(assembly.strokes)

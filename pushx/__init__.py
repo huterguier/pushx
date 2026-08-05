@@ -1,11 +1,11 @@
 import gxm
 
 from pushx.env import PushEnv
-from pushx.model import PushModel, PushState
+from pushx.dynamics import PushDynamics, PushState
 from pushx.letters import ASSEMBLIES
 from pushx.shapes import Assembly, Stroke, Weld
 
-__all__ = ["PushEnv", "PushModel", "PushState", "Assembly", "Stroke", "Weld", "ASSEMBLIES"]
+__all__ = ["PushEnv", "PushDynamics", "PushState", "Assembly", "Stroke", "Weld", "ASSEMBLIES"]
 
 
 def _make(name: str, **kwargs) -> PushEnv:

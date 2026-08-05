@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable
 
 import jax.numpy as jnp
 
-from pushx.model import PushState
+from pushx.dynamics import PushState
 
 if TYPE_CHECKING:
     from pushx.env import PushEnv

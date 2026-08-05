@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from pushx.model import PUSHER_RADIUS, SCENE_SIZE
+from pushx.dynamics import PUSHER_RADIUS, SCENE_SIZE
 from pushx.shapes import Assembly
 
 # pymunk's pygame debug-draw renders every shape two-toned: outline in the exact

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 
-from pushx.model import SCENE_SIZE
+from pushx.dynamics import SCENE_SIZE
 from pushx.shapes import Assembly, Stroke, Weld
 
 # ---------------------------------------------------------------------------

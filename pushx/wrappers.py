@@ -19,11 +19,11 @@ from gxm.wrappers import EnvironmentWrapper
 from gxm.wrappers.wrapper import WrapperState
 
 from pushx.env import PushEnv
-from pushx.model import SCENE_SIZE, PushState
+from pushx.dynamics import SCENE_SIZE, PushState
 
 
 class NormalizeAction(EnvironmentWrapper[Any]):
-    """Actions are given in [-1, 1]^2 and rescaled to the world-coordinate bounds PushModel expects."""
+    """Actions are given in [-1, 1]^2 and rescaled to the world-coordinate bounds PushDynamics expects."""
 
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper):
         super().__init__(wrapped)
@@ -64,7 +64,7 @@ class RelativeAction(EnvironmentWrapper[Any]):
 class VelocityAction(EnvironmentWrapper[Any]):
     """Actions are interpreted as a direct pusher velocity command.
 
-    PushModel.step now PD-tracks an absolute-position target (matching PushT's agent
+    PushDynamics.step now PD-tracks an absolute-position target (matching PushT's agent
     controller), rather than mapping position error to velocity directly, so a fixed
     target no longer gives an exact velocity. Targeting one physics step ahead in the
     commanded direction (`pos + action * dt`) is the ramp reference a PD tracker follows
@@ -83,7 +83,7 @@ class VelocityAction(EnvironmentWrapper[Any]):
         return self.wrapped.reset(key, state)
 
     def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
-        dt = 0.01  # matches PushModel's fixed SimParams.dt
+        dt = 0.01  # matches PushDynamics's fixed SimParams.dt
         target_pos = cast(PushEnv, self.wrapped).pusher_position(state) + action * dt
         state, timestep = self.wrapped.step(key, state, target_pos)
         return state, dataclasses.replace(timestep, action=action)
@@ -92,7 +92,7 @@ class VelocityAction(EnvironmentWrapper[Any]):
 class ActionRepeat(EnvironmentWrapper[Any]):
     """Hold one action for ``repeat`` simulation steps, lowering the control rate.
 
-    ``PushModel`` advances a single ``dt = 0.01`` step per call -- the same physics
+    ``PushDynamics`` advances a single ``dt = 0.01`` step per call -- the same physics
     dt PushT uses -- so an agent acting every raw step would decide at 100 Hz, far
     finer than the task needs, and it'd make consecutive observations nearly
     identical, which matters when those observations train a world model: one step
