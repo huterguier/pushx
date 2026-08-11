@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from pushx.dynamics import PUSHER_RADIUS, SCENE_SIZE
+from pushx.dynamics import (
+    PUSHER_RADIUS,
+    SCENE_SIZE,
+    WALL_HI,
+    WALL_LO,
+    WALL_MID,
+    WALL_SPAN,
+    WALL_THICKNESS,
+)
 from pushx.shapes import Assembly
 
 # pymunk's pygame debug-draw renders every shape two-toned: outline in the exact
@@ -15,6 +23,18 @@ _ROYAL_BLUE_FILL = jnp.clip(_ROYAL_BLUE * 1.2, 0.0, 1.0)
 _LIGHT_SLATE_GRAY = jnp.array([0.4667, 0.5333, 0.6])
 _LIGHT_SLATE_GRAY_FILL = jnp.clip(_LIGHT_SLATE_GRAY * 1.2, 0.0, 1.0)
 _LIGHT_GREEN = jnp.array([0.5647, 0.9333, 0.5647])
+# PushT's walls are pygame 'LightGray' (211, 211, 211). They are only 4px thick on a
+# 512px window, so the 1.2x-lightened interior is at most a pixel wide once the frame
+# is downsampled -- flat is what the rendered pixels actually look like.
+_LIGHT_GRAY = jnp.full(3, 211.0 / 255.0)
+
+_LONG_SIDE = WALL_SPAN + WALL_THICKNESS
+_WALLS = (
+    ((WALL_LO, WALL_MID), (WALL_THICKNESS, _LONG_SIDE)),
+    ((WALL_HI, WALL_MID), (WALL_THICKNESS, _LONG_SIDE)),
+    ((WALL_MID, WALL_LO), (_LONG_SIDE, WALL_THICKNESS)),
+    ((WALL_MID, WALL_HI), (_LONG_SIDE, WALL_THICKNESS)),
+)
 
 
 def _render_pixels(
@@ -33,15 +53,18 @@ def _render_pixels(
 
     edge_width = SCENE_SIZE / (2 * min(width, height))
     border_thickness = 4.0 * edge_width
-    # Must exceed border_thickness: the border's inner edge is this SDF eroded inward
-    # by border_thickness, so if overlap (how far touching strokes are grown into each
-    # other before the union) doesn't reach at least that far, the erosion reaches back
-    # out past the overlapped region into the same concave-corner ambiguity that
-    # `overlap` exists to avoid, and a stray border line reappears at the weld seam.
-    overlap = border_thickness + 2.0 * edge_width
+    # The goal is drawn as flat overlapping polygons with no outline, so two strokes
+    # that merely *touch* leave a half-alpha seam along the shared edge -- it sits
+    # exactly on the zero level set, where the union's SDF is 0 either way. Growing
+    # each stroke buries that edge inside both rectangles; shifting the SDF back by
+    # half the growth restores the true silhouette, so this costs no size.
+    seam_overlap = 2.0 * edge_width
 
     img = jnp.ones((height, width, 3))
 
+    # Draw order is PushT's: the goal polygon first, then `space.debug_draw` over it
+    # -- walls, then block, then pusher (see the pusher's comment for how that last
+    # ordering was established).
     goal_pos = state.goal_pos
     goal_angle = state.goal_angle
     cos_g, sin_g = jnp.cos(goal_angle), jnp.sin(goal_angle)
@@ -51,23 +74,32 @@ def _render_pixels(
     for stroke in assembly.strokes:
         pos = goal_pos + R_goal @ jnp.array(stroke.offset)
         angle = goal_angle + stroke.angle
-        size = (stroke.size[0] + overlap, stroke.size[1] + overlap)
+        size = (stroke.size[0] + seam_overlap, stroke.size[1] + seam_overlap)
         goal_sdf = jnp.minimum(goal_sdf, _rect_sdf(_rect_local(pixels, pos, angle), size))
-    goal_alpha = _smoothstep(edge_width, -edge_width, goal_sdf)
+    goal_alpha = _smoothstep(edge_width, -edge_width, goal_sdf + seam_overlap / 2)
     img = goal_alpha[..., None] * _LIGHT_GREEN + (1 - goal_alpha[..., None]) * img
 
-    assembly_sdf = jnp.full((height, width), jnp.inf)
+    for wall_pos, wall_dims in _WALLS:
+        wall_sdf = _rect_sdf(_rect_local(pixels, jnp.array(wall_pos), 0.0), wall_dims)
+        wall_alpha = _smoothstep(edge_width, -edge_width, wall_sdf)
+        img = wall_alpha[..., None] * _LIGHT_GRAY + (1 - wall_alpha[..., None]) * img
+
+    # One outlined rectangle per stroke, drawn in turn -- not a union. pymunk gives
+    # every *shape* its own outline, so PushT's T carries a seam line where the stem
+    # meets the bar, and the union this used to compute erased it. Drawing per stroke
+    # reproduces the seam and drops the silhouette inflation the union needed.
     for stroke, idx in zip(assembly.strokes, stroke_indices):
         pos = state.sim_state.polygon.position[idx]
         angle = state.sim_state.polygon.rotation[idx]
-        size = (stroke.size[0] + overlap, stroke.size[1] + overlap)
-        assembly_sdf = jnp.minimum(assembly_sdf, _rect_sdf(_rect_local(pixels, pos, angle), size))
-    fill_alpha = _smoothstep(edge_width, -edge_width, assembly_sdf)
-    inner_alpha = _smoothstep(edge_width, -edge_width, assembly_sdf + border_thickness)
-    border_alpha = fill_alpha - inner_alpha
-    img = fill_alpha[..., None] * _LIGHT_SLATE_GRAY_FILL + (1 - fill_alpha[..., None]) * img
-    img = border_alpha[..., None] * _LIGHT_SLATE_GRAY + (1 - border_alpha[..., None]) * img
+        stroke_sdf = _rect_sdf(_rect_local(pixels, pos, angle), stroke.size)
+        fill_alpha = _smoothstep(edge_width, -edge_width, stroke_sdf)
+        inner_alpha = _smoothstep(edge_width, -edge_width, stroke_sdf + border_thickness)
+        border_alpha = fill_alpha - inner_alpha
+        img = fill_alpha[..., None] * _LIGHT_SLATE_GRAY_FILL + (1 - fill_alpha[..., None]) * img
+        img = border_alpha[..., None] * _LIGHT_SLATE_GRAY + (1 - border_alpha[..., None]) * img
 
+    # Pusher last: sampling a PushT frame with the agent placed inside the block shows
+    # blue, so pymunk hands the agent to the renderer after the block.
     pusher_pos = state.sim_state.circle.position[pusher_idx]
     circle_sdf = jnp.linalg.norm(pixels - pusher_pos, axis=-1) - PUSHER_RADIUS
     circle_fill_alpha = _smoothstep(edge_width, -edge_width, circle_sdf)

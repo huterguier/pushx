@@ -23,6 +23,24 @@ _N_STATIC = 4  # jax2d's num_static_fixated_polys
 _PUSHT_PX_SCALE = SCENE_SIZE / 512.0
 PUSHER_RADIUS = 15.0 * _PUSHT_PX_SCALE  # PushT agent: base_radius=0.375 * scale=40 = 15px
 
+# PushT bounds its arena with 4 static wall segments at its window's [5, 506]px margins
+# (radius=2, so 4px thick). Module-level because `render` draws them too -- PushT's
+# `space.debug_draw` renders its walls into every frame, so a scene without them is a
+# visibly different picture. Defined above the `render` import, which consumes them.
+WALL_LO = 5.0 * _PUSHT_PX_SCALE
+WALL_HI = 506.0 * _PUSHT_PX_SCALE
+WALL_MID = (WALL_LO + WALL_HI) / 2
+WALL_SPAN = WALL_HI - WALL_LO
+WALL_THICKNESS = 4.0 * _PUSHT_PX_SCALE
+
+# Reset bounds, as [lo, hi] in world units, matching PushT's `variation_space`:
+# block/goal `start_position` is U[100, 400]px and the agent's is U[50, 450]px on a
+# 512px window, i.e. [0.391, 1.563] and [0.195, 1.758] here. Rounded to the nearest
+# tenth, which is within 0.04 of PushT and keeps both ranges centred on the scene.
+ASSEMBLY_MARGIN = 0.4  # -> [0.4, 1.6]
+PUSHER_MARGIN = 0.2  # -> [0.2, 1.8]
+GOAL_MARGIN = 0.4  # -> [0.4, 1.6]; PushT samples the goal from the block's own space
+
 from pushx.render import _render_pixels  # noqa: E402
 
 
@@ -72,20 +90,16 @@ class PushDynamics(Dynamics[PushState, Step]):
         sim_state = sim_state.replace(gravity=jnp.zeros(2))
         center = jnp.full(2, SCENE_SIZE / 2)
 
-        # PushT bounds its arena with 4 static wall segments at its window's [5, 506]px
-        # margins (radius=2, frictionless -- see the stroke loop's friction comment).
-        # `_N_STATIC` was already reserved for exactly this; walls fill it first so
-        # strokes/joints/pusher indices are unaffected.
-        wall_lo = 5.0 * _PUSHT_PX_SCALE
-        wall_hi = 506.0 * _PUSHT_PX_SCALE
-        wall_mid = (wall_lo + wall_hi) / 2
-        wall_span = wall_hi - wall_lo
-        wall_thickness = 4.0 * _PUSHT_PX_SCALE
+        # Frictionless, like everything else here -- see the stroke loop's friction
+        # comment. `_N_STATIC` was already reserved for exactly this; walls fill it
+        # first so strokes/joints/pusher indices are unaffected. Geometry is the
+        # module-level WALL_* so `render` draws the same walls the physics uses.
+        long_side = WALL_SPAN + WALL_THICKNESS
         walls = [
-            (jnp.array([wall_lo, wall_mid]), jnp.array([wall_thickness, wall_span + wall_thickness])),
-            (jnp.array([wall_hi, wall_mid]), jnp.array([wall_thickness, wall_span + wall_thickness])),
-            (jnp.array([wall_mid, wall_lo]), jnp.array([wall_span + wall_thickness, wall_thickness])),
-            (jnp.array([wall_mid, wall_hi]), jnp.array([wall_span + wall_thickness, wall_thickness])),
+            (jnp.array([WALL_LO, WALL_MID]), jnp.array([WALL_THICKNESS, long_side])),
+            (jnp.array([WALL_HI, WALL_MID]), jnp.array([WALL_THICKNESS, long_side])),
+            (jnp.array([WALL_MID, WALL_LO]), jnp.array([long_side, WALL_THICKNESS])),
+            (jnp.array([WALL_MID, WALL_HI]), jnp.array([long_side, WALL_THICKNESS])),
         ]
         for wall_pos, wall_dims in walls:
             sim_state, _ = add_rectangle_to_scene(
@@ -160,12 +174,17 @@ class PushDynamics(Dynamics[PushState, Step]):
 
     def _randomise(self, key: Key) -> SimState:
         key_pos, key_angle, key_pusher = jax.random.split(key, 3)
-        margin = 0.3
-        lo, hi = margin, SCENE_SIZE - margin
 
-        assembly_pos = jax.random.uniform(key_pos, (2,), minval=lo, maxval=hi)
+        # Separate margins: PushT samples the agent from a wider box than the block
+        # (50..450px vs 100..400px), so a single shared margin never let the pusher
+        # start outside the block's own band.
+        assembly_pos = jax.random.uniform(
+            key_pos, (2,), minval=ASSEMBLY_MARGIN, maxval=SCENE_SIZE - ASSEMBLY_MARGIN
+        )
         assembly_angle = jax.random.uniform(key_angle, (), minval=-jnp.pi, maxval=jnp.pi)
-        pusher_pos = jax.random.uniform(key_pusher, (2,), minval=lo, maxval=hi)
+        pusher_pos = jax.random.uniform(
+            key_pusher, (2,), minval=PUSHER_MARGIN, maxval=SCENE_SIZE - PUSHER_MARGIN
+        )
 
         cos_a, sin_a = jnp.cos(assembly_angle), jnp.sin(assembly_angle)
         rot = jnp.array([[cos_a, -sin_a], [sin_a, cos_a]])
@@ -198,8 +217,9 @@ class PushDynamics(Dynamics[PushState, Step]):
 
     def _random_goal(self, key: Key) -> tuple[jnp.ndarray, jnp.ndarray]:
         key_pos, key_angle = jax.random.split(key)
-        margin = 0.4
-        goal_pos = jax.random.uniform(key_pos, (2,), minval=margin, maxval=SCENE_SIZE - margin)
+        goal_pos = jax.random.uniform(
+            key_pos, (2,), minval=GOAL_MARGIN, maxval=SCENE_SIZE - GOAL_MARGIN
+        )
         # Sample from canonical range [−π/k, π/k] so goal_angle is unambiguous in raw obs
         half = jnp.pi / self._assembly.symmetry_order
         goal_angle = jax.random.uniform(key_angle, (), minval=-half, maxval=half)
@@ -240,13 +260,19 @@ class PushDynamics(Dynamics[PushState, Step]):
             jnp.zeros(self._static.num_joints + self._static.num_thrusters),
         )
 
-        # 0.6 was tuned per-step at dt=1/60 with a 6-substep (0.1s) control period; at
-        # dt=0.01 the same period now takes 10 substeps, so the per-step factor is
-        # rescaled (0.6 ** (6/10)) to keep the same total decay over one control step.
-        damping = 0.6 ** (6 / 10)
+        # PushT runs its pymunk space at `damping = 0`, and pymunk scales velocity by
+        # `damping ** dt` at the *start* of each step -- so the block enters every step
+        # from rest, is moved by that step's contact impulse alone, and never coasts.
+        # Zeroing here, after the engine has already integrated positions with the
+        # post-impulse velocity, reproduces that ordering exactly. The pusher is
+        # `fixated` and unaffected, as PushT's KINEMATIC agent is.
+        #
+        # This replaced a 0.736 per-step retention, which let the block carry momentum
+        # between steps and was the larger half of pushx pushing the block ~1.2x
+        # further per contact than PushT does.
         poly = new_sim.polygon.replace(
-            velocity=new_sim.polygon.velocity * damping,
-            angular_velocity=new_sim.polygon.angular_velocity * damping,
+            velocity=jnp.zeros_like(new_sim.polygon.velocity),
+            angular_velocity=jnp.zeros_like(new_sim.polygon.angular_velocity),
         )
         new_sim = new_sim.replace(polygon=poly)
 
