@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpy as np
 
 from pushx.dynamics import (
     PUSHER_RADIUS,
@@ -18,15 +19,15 @@ from pushx.shapes import Assembly
 # rendered PushT pixels (block outline (119,136,153) vs fill (143,163,184), pusher
 # outline (65,105,225) vs fill (78,126,255): both ratios are 1.20 on every unclipped
 # channel). The goal has no separate outline (drawn with a flat pygame.draw.polygon).
-_ROYAL_BLUE = jnp.array([0.2549, 0.4118, 0.8824])
-_ROYAL_BLUE_FILL = jnp.clip(_ROYAL_BLUE * 1.2, 0.0, 1.0)
-_LIGHT_SLATE_GRAY = jnp.array([0.4667, 0.5333, 0.6])
-_LIGHT_SLATE_GRAY_FILL = jnp.clip(_LIGHT_SLATE_GRAY * 1.2, 0.0, 1.0)
-_LIGHT_GREEN = jnp.array([0.5647, 0.9333, 0.5647])
+_ROYAL_BLUE = np.array([0.2549, 0.4118, 0.8824], dtype=np.float32)
+_ROYAL_BLUE_FILL = np.clip(_ROYAL_BLUE * 1.2, 0.0, 1.0)
+_LIGHT_SLATE_GRAY = np.array([0.4667, 0.5333, 0.6], dtype=np.float32)
+_LIGHT_SLATE_GRAY_FILL = np.clip(_LIGHT_SLATE_GRAY * 1.2, 0.0, 1.0)
+_LIGHT_GREEN = np.array([0.5647, 0.9333, 0.5647], dtype=np.float32)
 # PushT's walls are pygame 'LightGray' (211, 211, 211). They are only 4px thick on a
 # 512px window, so the 1.2x-lightened interior is at most a pixel wide once the frame
 # is downsampled -- flat is what the rendered pixels actually look like.
-_LIGHT_GRAY = jnp.full(3, 211.0 / 255.0)
+_LIGHT_GRAY = np.full(3, 211.0 / 255.0, dtype=np.float32)
 
 _LONG_SIDE = WALL_SPAN + WALL_THICKNESS
 _WALLS = (
