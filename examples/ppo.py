@@ -15,8 +15,6 @@ targets plateau at <10% success).
 
 from pathlib import Path
 
-from rlax import PPO, PPOConfig
-
 import distrax
 import flax.linen as nn
 import jax
@@ -26,13 +24,16 @@ import optax
 from flax import serialization
 from gxm.wrappers import AutoReset, TimeLimit
 from gxm.wrappers.wrapper import WrapperState
+from rlax import PPO, PPOConfig
 
 from pushx import ASSEMBLIES, PushEnv, rewards
 from pushx.wrappers import ActionRepeat, RelativeAction
 
 SHAPE = "P"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
-ACTION_REPEAT = 10  # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
+ACTION_REPEAT = (
+    10  # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
+)
 TIME_LIMIT = 100  # in control steps; at 10 Hz this is 10 seconds per episode
 CHECKPOINTS = Path(__file__).parent / "checkpoints"
 
@@ -120,7 +121,10 @@ def save_gif(env, params, network, key, path):
     plt.tight_layout()
     image = ax.imshow(frames[0], interpolation="nearest")
     anim = animation.FuncAnimation(
-        fig, lambda i: image.set_data(frames[i]), frames=len(frames), interval=1000 / (100 / ACTION_REPEAT)
+        fig,
+        lambda i: image.set_data(frames[i]),
+        frames=len(frames),
+        interval=1000 / (100 / ACTION_REPEAT),
     )
     anim.save(path, writer="pillow", fps=60)
     plt.close(fig)
@@ -160,16 +164,19 @@ if __name__ == "__main__":
             # inside RelativeAction: the absolute target is held for the whole
             # control step, rather than the delta re-applying every sim step
             ActionRepeat(
-                PushEnv(ASSEMBLIES[SHAPE], reward_fn=reward_fn),
-                repeat=ACTION_REPEAT),
-            scale=ACTION_DELTA),
+                PushEnv(ASSEMBLIES[SHAPE], reward_fn=reward_fn), repeat=ACTION_REPEAT
+            ),
+            scale=ACTION_DELTA,
+        ),
         time_limit=TIME_LIMIT,
     ).seal()
     network = ActorCritic(env.action_space.shape[0])
     num_optimizer_steps = (
         config.num_loops(num_steps) * config.num_update_epochs * config.num_minibatches
     )
-    optimizer = optax.adam(optax.linear_schedule(learning_rate, 0.0, num_optimizer_steps))
+    optimizer = optax.adam(
+        optax.linear_schedule(learning_rate, 0.0, num_optimizer_steps)
+    )
 
     ppo = PPO(config, AutoReset(env), network, optimizer)
     train = jax.jit(ppo.train, static_argnames="num_steps")
@@ -179,12 +186,23 @@ if __name__ == "__main__":
     key, key_init, key_eval, key_gif = jax.random.split(key, 4)
     ppo_state = ppo.init(key_init)
     CHECKPOINTS.mkdir(exist_ok=True)
-    (CHECKPOINTS / f"ppo_{SHAPE}_0.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
-    print("epoch  0:", evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256))
+    (CHECKPOINTS / f"ppo_{SHAPE}_0.msgpack").write_bytes(
+        serialization.to_bytes(ppo_state.params)
+    )
+    print(
+        "epoch  0:", evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256)
+    )
     for epoch in range(1, num_epochs + 1):
         key, key_train, key_eval = jax.random.split(key, 3)
         ppo_state = train(key_train, ppo_state, num_steps=num_steps // num_epochs)
-        (CHECKPOINTS / f"ppo_{SHAPE}_{epoch}.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
-        print(f"epoch {epoch:2d}:", evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256))
-    (CHECKPOINTS / f"ppo_{SHAPE}.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
+        (CHECKPOINTS / f"ppo_{SHAPE}_{epoch}.msgpack").write_bytes(
+            serialization.to_bytes(ppo_state.params)
+        )
+        print(
+            f"epoch {epoch:2d}:",
+            evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256),
+        )
+    (CHECKPOINTS / f"ppo_{SHAPE}.msgpack").write_bytes(
+        serialization.to_bytes(ppo_state.params)
+    )
     save_gif(env, ppo_state.params, network, key_gif, f"ppo_{SHAPE}.gif")

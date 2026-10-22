@@ -1,4 +1,5 @@
 """Pluggable reward functions for PushEnv, all sharing the RewardFn signature."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
@@ -29,7 +30,9 @@ def potential_shaping(pos_weight: float = 1.0, angle_weight: float = 1.0) -> Rew
     def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
         prev_pos_err, prev_angle_err = env.error(state)
         curr_pos_err, curr_angle_err = env.error(new_state)
-        improvement = (prev_pos_err - curr_pos_err) * pos_weight + (prev_angle_err - curr_angle_err) * angle_weight
+        improvement = (prev_pos_err - curr_pos_err) * pos_weight + (
+            prev_angle_err - curr_angle_err
+        ) * angle_weight
         return improvement + env.success(new_state).astype(jnp.float32)
 
     return reward_fn
@@ -43,8 +46,12 @@ def pusher_approach(weight: float = 0.5) -> RewardFn:
     """
 
     def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
-        prev = jnp.linalg.norm(env.pusher_position(state) - env.assembly_position(state))
-        curr = jnp.linalg.norm(env.pusher_position(new_state) - env.assembly_position(new_state))
+        prev = jnp.linalg.norm(
+            env.pusher_position(state) - env.assembly_position(state)
+        )
+        curr = jnp.linalg.norm(
+            env.pusher_position(new_state) - env.assembly_position(new_state)
+        )
         return weight * (prev - curr)
 
     return reward_fn

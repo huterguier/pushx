@@ -76,7 +76,9 @@ def _render_pixels(
         pos = goal_pos + R_goal @ jnp.array(stroke.offset)
         angle = goal_angle + stroke.angle
         size = (stroke.size[0] + seam_overlap, stroke.size[1] + seam_overlap)
-        goal_sdf = jnp.minimum(goal_sdf, _rect_sdf(_rect_local(pixels, pos, angle), size))
+        goal_sdf = jnp.minimum(
+            goal_sdf, _rect_sdf(_rect_local(pixels, pos, angle), size)
+        )
     goal_alpha = _smoothstep(edge_width, -edge_width, goal_sdf + seam_overlap / 2)
     img = goal_alpha[..., None] * _LIGHT_GREEN + (1 - goal_alpha[..., None]) * img
 
@@ -94,20 +96,36 @@ def _render_pixels(
         angle = state.sim_state.polygon.rotation[idx]
         stroke_sdf = _rect_sdf(_rect_local(pixels, pos, angle), stroke.size)
         fill_alpha = _smoothstep(edge_width, -edge_width, stroke_sdf)
-        inner_alpha = _smoothstep(edge_width, -edge_width, stroke_sdf + border_thickness)
+        inner_alpha = _smoothstep(
+            edge_width, -edge_width, stroke_sdf + border_thickness
+        )
         border_alpha = fill_alpha - inner_alpha
-        img = fill_alpha[..., None] * _LIGHT_SLATE_GRAY_FILL + (1 - fill_alpha[..., None]) * img
-        img = border_alpha[..., None] * _LIGHT_SLATE_GRAY + (1 - border_alpha[..., None]) * img
+        img = (
+            fill_alpha[..., None] * _LIGHT_SLATE_GRAY_FILL
+            + (1 - fill_alpha[..., None]) * img
+        )
+        img = (
+            border_alpha[..., None] * _LIGHT_SLATE_GRAY
+            + (1 - border_alpha[..., None]) * img
+        )
 
     # Pusher last: sampling a PushT frame with the agent placed inside the block shows
     # blue, so pymunk hands the agent to the renderer after the block.
     pusher_pos = state.sim_state.circle.position[pusher_idx]
     circle_sdf = jnp.linalg.norm(pixels - pusher_pos, axis=-1) - PUSHER_RADIUS
     circle_fill_alpha = _smoothstep(edge_width, -edge_width, circle_sdf)
-    circle_inner_alpha = _smoothstep(edge_width, -edge_width, circle_sdf + border_thickness)
+    circle_inner_alpha = _smoothstep(
+        edge_width, -edge_width, circle_sdf + border_thickness
+    )
     circle_border_alpha = circle_fill_alpha - circle_inner_alpha
-    img = circle_fill_alpha[..., None] * _ROYAL_BLUE_FILL + (1 - circle_fill_alpha[..., None]) * img
-    img = circle_border_alpha[..., None] * _ROYAL_BLUE + (1 - circle_border_alpha[..., None]) * img
+    img = (
+        circle_fill_alpha[..., None] * _ROYAL_BLUE_FILL
+        + (1 - circle_fill_alpha[..., None]) * img
+    )
+    img = (
+        circle_border_alpha[..., None] * _ROYAL_BLUE
+        + (1 - circle_border_alpha[..., None]) * img
+    )
 
     return img
 
@@ -119,10 +137,14 @@ def _smoothstep(edge0: float, edge1: float, x: jnp.ndarray) -> jnp.ndarray:
 
 def _rect_sdf(p_local: jnp.ndarray, size: tuple[float, float]) -> jnp.ndarray:
     q = jnp.abs(p_local) - jnp.array([size[0] / 2, size[1] / 2])
-    return jnp.linalg.norm(jnp.maximum(q, 0), axis=-1) + jnp.minimum(jnp.maximum(q[..., 0], q[..., 1]), 0)
+    return jnp.linalg.norm(jnp.maximum(q, 0), axis=-1) + jnp.minimum(
+        jnp.maximum(q[..., 0], q[..., 1]), 0
+    )
 
 
-def _rect_local(pixels: jnp.ndarray, center: jnp.ndarray, angle: jnp.ndarray) -> jnp.ndarray:
+def _rect_local(
+    pixels: jnp.ndarray, center: jnp.ndarray, angle: jnp.ndarray
+) -> jnp.ndarray:
     cos_a, sin_a = jnp.cos(-angle), jnp.sin(-angle)
     R_inv = jnp.array([[cos_a, -sin_a], [sin_a, cos_a]])
     return jnp.einsum("ij,...j->...i", R_inv, pixels - center)

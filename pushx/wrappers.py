@@ -5,6 +5,7 @@ For discrete-direction actions, no wrapper is needed here — compose gxm's own
 
     Discretize(RelativeAction(PushEnv(assembly)), actions=jnp.array([...]))
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -18,8 +19,8 @@ from gxm.typing import Key
 from gxm.wrappers import EnvironmentWrapper
 from gxm.wrappers.wrapper import WrapperState
 
-from pushx.env import PushEnv
 from pushx.dynamics import SCENE_SIZE, PushState
+from pushx.env import PushEnv
 
 
 class NormalizeAction(EnvironmentWrapper[Any]):
@@ -35,7 +36,9 @@ class NormalizeAction(EnvironmentWrapper[Any]):
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Timestep]:
         return self.wrapped.reset(key, state)
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Timestep]:
         world_action = (action + 1.0) * 0.5 * SCENE_SIZE
         state, timestep = self.wrapped.step(key, state, world_action)
         return state, dataclasses.replace(timestep, action=action)
@@ -47,7 +50,9 @@ class RelativeAction(EnvironmentWrapper[Any]):
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper, scale: float = 0.3):
         super().__init__(wrapped)
         self.scale = scale
-        self.action_space = Box(low=-jnp.full(2, scale), high=jnp.full(2, scale), shape=(2,))
+        self.action_space = Box(
+            low=-jnp.full(2, scale), high=jnp.full(2, scale), shape=(2,)
+        )
 
     def init(self, key: Key) -> tuple[PushState, Timestep]:
         return self.wrapped.init(key)
@@ -55,7 +60,9 @@ class RelativeAction(EnvironmentWrapper[Any]):
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Timestep]:
         return self.wrapped.reset(key, state)
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Timestep]:
         world_action = cast(PushEnv, self.wrapped).pusher_position(state) + action
         state, timestep = self.wrapped.step(key, state, world_action)
         return state, dataclasses.replace(timestep, action=action)
@@ -74,7 +81,9 @@ class VelocityAction(EnvironmentWrapper[Any]):
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper, max_speed: float = 3.0):
         super().__init__(wrapped)
         self.max_speed = max_speed
-        self.action_space = Box(low=-jnp.full(2, max_speed), high=jnp.full(2, max_speed), shape=(2,))
+        self.action_space = Box(
+            low=-jnp.full(2, max_speed), high=jnp.full(2, max_speed), shape=(2,)
+        )
 
     def init(self, key: Key) -> tuple[PushState, Timestep]:
         return self.wrapped.init(key)
@@ -82,7 +91,9 @@ class VelocityAction(EnvironmentWrapper[Any]):
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Timestep]:
         return self.wrapped.reset(key, state)
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Timestep]:
         dt = 0.01  # matches PushDynamics's fixed SimParams.dt
         target_pos = cast(PushEnv, self.wrapped).pusher_position(state) + action * dt
         state, timestep = self.wrapped.step(key, state, target_pos)
@@ -127,7 +138,7 @@ class ActionRepeat(EnvironmentWrapper[Any]):
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper, repeat: int = 10):
         super().__init__(wrapped)
         if repeat < 1:
-            raise ValueError(f'repeat must be >= 1, got {repeat}')
+            raise ValueError(f"repeat must be >= 1, got {repeat}")
         self.repeat = repeat
 
     def init(self, key: Key) -> tuple[PushState, Timestep]:
@@ -136,16 +147,22 @@ class ActionRepeat(EnvironmentWrapper[Any]):
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Timestep]:
         return self.wrapped.reset(key, state)
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Timestep]:
         def one(carry, step_key):
             state, total, truncated = carry
             next_state, timestep = self.wrapped.step(step_key, state, action)
-            state = jax.tree.map(lambda a, b: jnp.where(truncated, a, b), state, next_state)
+            state = jax.tree.map(
+                lambda a, b: jnp.where(truncated, a, b), state, next_state
+            )
             total = total + jnp.where(truncated, 0.0, timestep.reward)
             return (state, total, truncated | timestep.truncated), timestep
 
         (state, total, truncated), timesteps = jax.lax.scan(
-            one, (state, jnp.zeros(()), jnp.array(False)), jax.random.split(key, self.repeat)
+            one,
+            (state, jnp.zeros(()), jnp.array(False)),
+            jax.random.split(key, self.repeat),
         )
         last = jnp.where(truncated, jnp.argmax(timesteps.truncated), self.repeat - 1)
         last = jax.tree.map(lambda x: x[last], timesteps)
@@ -155,7 +172,9 @@ class ActionRepeat(EnvironmentWrapper[Any]):
 class PixelObservation(EnvironmentWrapper[Any]):
     """Replaces the raw-state observation with a rendered (height, width, 3) pixel image."""
 
-    def __init__(self, wrapped: PushEnv | EnvironmentWrapper, width: int = 64, height: int = 64):
+    def __init__(
+        self, wrapped: PushEnv | EnvironmentWrapper, width: int = 64, height: int = 64
+    ):
         super().__init__(wrapped)
         self.width = width
         self.height = height
@@ -173,7 +192,9 @@ class PixelObservation(EnvironmentWrapper[Any]):
         state, timestep = self.wrapped.reset(key, state)
         return state, self._render_timestep(state, timestep)
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Timestep]:
         state, timestep = self.wrapped.step(key, state, action)
         return state, self._render_timestep(state, timestep)
 
@@ -247,7 +268,9 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         wrapped_state, timestep = self.wrapped.init(key_init)
         return self._new_state(key_sample, wrapped_state), self._mark_success(timestep)
 
-    def reset(self, key: Key, state: LingerResetState) -> tuple[LingerResetState, Timestep]:
+    def reset(
+        self, key: Key, state: LingerResetState
+    ) -> tuple[LingerResetState, Timestep]:
         key_reset, key_sample = jax.random.split(key)
         wrapped_state, timestep = self.wrapped.reset(key_reset, state.wrapped_state)
         return self._new_state(key_sample, wrapped_state), self._mark_success(timestep)
@@ -256,13 +279,17 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         self, key: Key, state: LingerResetState, action: jnp.ndarray
     ) -> tuple[LingerResetState, Timestep]:
         key_step, key_reset, key_sample = jax.random.split(key, 3)
-        wrapped_state, timestep = self.wrapped.step(key_step, state.wrapped_state, action)
+        wrapped_state, timestep = self.wrapped.step(
+            key_step, state.wrapped_state, action
+        )
 
         success = timestep.terminated
         started = state.started | success
         linger = jnp.where(started, state.linger - 1, state.linger)
         steps = state.steps + 1
-        expired = timestep.truncated | (steps >= state.limit) | (started & (linger <= 0))
+        expired = (
+            timestep.truncated | (steps >= state.limit) | (started & (linger <= 0))
+        )
 
         step_state = LingerResetState(
             wrapped_state=wrapped_state,
@@ -273,7 +300,9 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         )
         step_timestep = self._mark_success(timestep)
 
-        reset_wrapped_state, reset_timestep = self.wrapped.reset(key_reset, wrapped_state)
+        reset_wrapped_state, reset_timestep = self.wrapped.reset(
+            key_reset, wrapped_state
+        )
         reset_state = self._new_state(key_sample, reset_wrapped_state)
         reset_timestep = Timestep(
             next_obs=reset_timestep.next_obs,

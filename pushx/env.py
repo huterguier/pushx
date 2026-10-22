@@ -53,7 +53,9 @@ class PushEnv(Environment[PushState]):
         """Whether any stroke's center has left the arena, or gone NaN. The fixated pusher
         out-muscles the walls, so it can crush the assembly through one; past that point
         the welds tear and jax2d eventually emits NaNs, so ``step`` truncates the episode here."""
-        pos = state.sim_state.polygon.position[jnp.array(self._dynamics._stroke_indices)]
+        pos = state.sim_state.polygon.position[
+            jnp.array(self._dynamics._stroke_indices)
+        ]
         return jnp.any((pos < WALL_LO) | (pos > WALL_HI) | jnp.isnan(pos))
 
     def pusher_position(self, state: PushState) -> jnp.ndarray:
@@ -77,7 +79,9 @@ class PushEnv(Environment[PushState]):
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Timestep]:
         return self.init(key)
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Timestep]:
         new_state, dynamics_step = self._dynamics.step(key, state, action)
         success = self.success(new_state)
         reward = self._reward_fn(self, state, new_state)
@@ -91,5 +95,7 @@ class PushEnv(Environment[PushState]):
             info={},
         )
 
-    def render(self, state: PushState, width: int = 64, height: int = 64) -> jnp.ndarray:
+    def render(
+        self, state: PushState, width: int = 64, height: int = 64
+    ) -> jnp.ndarray:
         return self._dynamics.render(state, width, height)

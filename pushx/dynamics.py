@@ -8,7 +8,11 @@ from gxm import Dynamics, DynamicsState, Step
 from gxm.spaces import Box
 from gxm.typing import Key
 from jax2d.engine import PhysicsEngine, create_empty_sim
-from jax2d.scene import add_circle_to_scene, add_fixed_joint_to_scene, add_rectangle_to_scene
+from jax2d.scene import (
+    add_circle_to_scene,
+    add_fixed_joint_to_scene,
+    add_rectangle_to_scene,
+)
 from jax2d.sim_state import SimParams, SimState, StaticSimParams
 
 from pushx.shapes import Assembly
@@ -21,7 +25,9 @@ _N_STATIC = 4  # jax2d's num_static_fixated_polys
 # pixel constants (see letters.py's T) and the pusher radius below land at the same
 # proportions.
 _PUSHT_PX_SCALE = SCENE_SIZE / 512.0
-PUSHER_RADIUS = 15.0 * _PUSHT_PX_SCALE  # PushT agent: base_radius=0.375 * scale=40 = 15px
+PUSHER_RADIUS = (
+    15.0 * _PUSHT_PX_SCALE
+)  # PushT agent: base_radius=0.375 * scale=40 = 15px
 
 # PushT bounds its arena with 4 static wall segments at its window's [5, 506]px margins
 # (radius=2, so 4px thick). Module-level because `render` draws them too -- PushT's
@@ -48,7 +54,7 @@ from pushx.render import _render_pixels  # noqa: E402
 @dataclass
 class PushState(DynamicsState):
     sim_state: SimState
-    goal_pos: jnp.ndarray   # (2,)
+    goal_pos: jnp.ndarray  # (2,)
     goal_angle: jnp.ndarray  # ()
 
 
@@ -71,8 +77,8 @@ class PushDynamics(Dynamics[PushState, Step]):
         angle)``: both positions get a uniform offset within ``±distance`` per
         axis and the block angle one within ``±angle`` radians."""
         self._assembly = assembly
-        self._spawn = None if spawn is None else tuple(
-            jnp.asarray(v, jnp.float32) for v in spawn
+        self._spawn = (
+            None if spawn is None else tuple(jnp.asarray(v, jnp.float32) for v in spawn)
         )
         self._spawn_jitter = spawn_jitter
         if goal is None:
@@ -91,14 +97,29 @@ class PushDynamics(Dynamics[PushState, Step]):
             num_thrusters=1,
             max_polygon_vertices=4,
         )
-        self._params = SimParams(dt=0.01)  # matches PushT's physics dt exactly (see ActionRepeat)
+        self._params = SimParams(
+            dt=0.01
+        )  # matches PushT's physics dt exactly (see ActionRepeat)
         self._engine = PhysicsEngine(self._static)
-        self._base_sim_state, self._stroke_indices, self._pusher_idx = self._build_scene()
+        self._base_sim_state, self._stroke_indices, self._pusher_idx = (
+            self._build_scene()
+        )
 
         goal_angle_bound = jnp.pi / assembly.symmetry_order
         self.observation_space = Box(
             low=jnp.array([0.0, 0.0, -jnp.pi, 0.0, 0.0, 0.0, 0.0, -goal_angle_bound]),
-            high=jnp.array([SCENE_SIZE, SCENE_SIZE, jnp.pi, SCENE_SIZE, SCENE_SIZE, SCENE_SIZE, SCENE_SIZE, goal_angle_bound]),
+            high=jnp.array(
+                [
+                    SCENE_SIZE,
+                    SCENE_SIZE,
+                    jnp.pi,
+                    SCENE_SIZE,
+                    SCENE_SIZE,
+                    SCENE_SIZE,
+                    SCENE_SIZE,
+                    goal_angle_bound,
+                ]
+            ),
             shape=(8,),
         )
         self.action_space = Box(
@@ -165,7 +186,10 @@ class PushDynamics(Dynamics[PushState, Step]):
             stroke_indices.append(idx)
 
         for weld in self._assembly.welds:
-            ref_angle = self._assembly.strokes[weld.b].angle - self._assembly.strokes[weld.a].angle
+            ref_angle = (
+                self._assembly.strokes[weld.b].angle
+                - self._assembly.strokes[weld.a].angle
+            )
             sim_state, joint_idx = add_fixed_joint_to_scene(
                 sim_state,
                 self._static,
@@ -192,14 +216,23 @@ class PushDynamics(Dynamics[PushState, Step]):
 
         return sim_state, stroke_indices, pusher_idx
 
-    def _obs(self, sim_state: SimState, goal_pos: jnp.ndarray, goal_angle: jnp.ndarray) -> jnp.ndarray:
+    def _obs(
+        self, sim_state: SimState, goal_pos: jnp.ndarray, goal_angle: jnp.ndarray
+    ) -> jnp.ndarray:
         root_pos = sim_state.polygon.position[self._stroke_indices[0]]
         # Report assembly angle (= world angle - stroke_0 offset) so it's comparable to goal_angle
-        assembly_angle = sim_state.polygon.rotation[self._stroke_indices[0]] - self._assembly.strokes[0].angle
+        assembly_angle = (
+            sim_state.polygon.rotation[self._stroke_indices[0]]
+            - self._assembly.strokes[0].angle
+        )
         pusher_pos = sim_state.circle.position[self._pusher_idx]
-        return jnp.concatenate([root_pos, assembly_angle[None], pusher_pos, goal_pos, goal_angle[None]])
+        return jnp.concatenate(
+            [root_pos, assembly_angle[None], pusher_pos, goal_pos, goal_angle[None]]
+        )
 
-    def _rigidify(self, position: jnp.ndarray, rotation: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def _rigidify(
+        self, position: jnp.ndarray, rotation: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         # PushT's block is a single rigid body carrying several shapes; here it is
         # several bodies held by jax2d's soft fixed joints, which the fixated pusher
         # can tear apart by crushing the block into a wall -- after which the solver
@@ -214,7 +247,9 @@ class PushDynamics(Dynamics[PushState, Step]):
         cos, sin = jnp.cos(angle), jnp.sin(angle)
         world_offsets = offsets @ jnp.array([[cos, -sin], [sin, cos]]).T
         origin = jnp.mean(position[idx] - world_offsets, axis=0)
-        return position.at[idx].set(origin + world_offsets), rotation.at[idx].set(angle + angles)
+        return position.at[idx].set(origin + world_offsets), rotation.at[idx].set(
+            angle + angles
+        )
 
     def _randomise(self, key: Key) -> SimState:
         key_pos, key_angle, key_pusher = jax.random.split(key, 3)
@@ -224,11 +259,19 @@ class PushDynamics(Dynamics[PushState, Step]):
         # start outside the block's own band.
         if self._spawn is None:
             assembly_pos = jax.random.uniform(
-                key_pos, (2,), minval=ASSEMBLY_MARGIN, maxval=SCENE_SIZE - ASSEMBLY_MARGIN
+                key_pos,
+                (2,),
+                minval=ASSEMBLY_MARGIN,
+                maxval=SCENE_SIZE - ASSEMBLY_MARGIN,
             )
-            assembly_angle = jax.random.uniform(key_angle, (), minval=-jnp.pi, maxval=jnp.pi)
+            assembly_angle = jax.random.uniform(
+                key_angle, (), minval=-jnp.pi, maxval=jnp.pi
+            )
             pusher_pos = jax.random.uniform(
-                key_pusher, (2,), minval=PUSHER_MARGIN, maxval=SCENE_SIZE - PUSHER_MARGIN
+                key_pusher,
+                (2,),
+                minval=PUSHER_MARGIN,
+                maxval=SCENE_SIZE - PUSHER_MARGIN,
             )
         else:
             assembly_pos, assembly_angle, pusher_pos = self._spawn
@@ -301,7 +344,9 @@ class PushDynamics(Dynamics[PushState, Step]):
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Step]:
         return self.init(key)  # state is ignored; full re-randomisation on every reset
 
-    def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Step]:
+    def step(
+        self, key: Key, state: PushState, action: jnp.ndarray
+    ) -> tuple[PushState, Step]:
         # PD control toward `action` (an absolute world-space target), matching PushT's
         # agent controller: k_p/k_v are time constants (1/s^2, 1/s) and so are independent
         # of SCENE_SIZE's coordinate scale -- these are the same gains PushT uses on its
@@ -332,7 +377,9 @@ class PushDynamics(Dynamics[PushState, Step]):
         # This replaced a 0.736 per-step retention, which let the block carry momentum
         # between steps and was the larger half of pushx pushing the block ~1.2x
         # further per contact than PushT does.
-        position, rotation = self._rigidify(new_sim.polygon.position, new_sim.polygon.rotation)
+        position, rotation = self._rigidify(
+            new_sim.polygon.position, new_sim.polygon.rotation
+        )
         poly = new_sim.polygon.replace(
             position=position,
             rotation=rotation,
@@ -350,5 +397,9 @@ class PushDynamics(Dynamics[PushState, Step]):
             info={},
         )
 
-    def render(self, state: PushState, width: int = 64, height: int = 64) -> jnp.ndarray:
-        return _render_pixels(state, self._assembly, self._stroke_indices, self._pusher_idx, width, height)
+    def render(
+        self, state: PushState, width: int = 64, height: int = 64
+    ) -> jnp.ndarray:
+        return _render_pixels(
+            state, self._assembly, self._stroke_indices, self._pusher_idx, width, height
+        )

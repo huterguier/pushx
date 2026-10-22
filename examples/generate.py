@@ -78,7 +78,9 @@ def make_generate(policies):
 
         # The policy MLP is tiny: evaluating every checkpoint on the full batch
         # and selecting per env is cheaper than gathering per-env parameters.
-        actions = jax.vmap(sample)(policies, jax.random.split(key_policies, num_policies))
+        actions = jax.vmap(sample)(
+            policies, jax.random.split(key_policies, num_policies)
+        )
         actions = jnp.take_along_axis(actions, policy_idx[None, :, None], axis=0)[0]
         random_actions = jax.random.uniform(
             key_random,

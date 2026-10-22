@@ -16,7 +16,9 @@ SHAPE = "X"  # change to "T", "L", "H", "I", "+", or any key in ASSEMBLIES
 SHAPE = "P"  # change to "T", "L", "H", "I", "+", or any key in ASSEMBLIES
 RENDER_SIZE = 200
 
-env = PixelObservation(PushEnv(ASSEMBLIES[SHAPE]), width=RENDER_SIZE, height=RENDER_SIZE)
+env = PixelObservation(
+    PushEnv(ASSEMBLIES[SHAPE]), width=RENDER_SIZE, height=RENDER_SIZE
+)
 step_jit = jax.jit(env.step)
 reset_jit = jax.jit(env.reset)
 
@@ -28,12 +30,12 @@ mouse_pos = np.array([1.0, 1.0])
 
 fig, ax = plt.subplots(figsize=(5, 5))
 ax.axis("off")
-title = plt.title(f"Move mouse to push {SHAPE}  ({RENDER_SIZE}×{RENDER_SIZE}px)", fontsize=10)
+title = plt.title(
+    f"Move mouse to push {SHAPE}  ({RENDER_SIZE}×{RENDER_SIZE}px)", fontsize=10
+)
 plt.tight_layout()
 
-img_display = ax.imshow(
-    np.array(timestep.next_obs), interpolation="nearest"
-)
+img_display = ax.imshow(np.array(timestep.next_obs), interpolation="nearest")
 
 
 def on_move(event):
