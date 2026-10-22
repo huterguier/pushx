@@ -29,7 +29,7 @@ from rlax import PPO, PPOConfig
 from pushx import ASSEMBLIES, PushEnv, rewards
 from pushx.wrappers import ActionRepeat, RelativeAction
 
-SHAPE = "P"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
+SHAPE = "T"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
 # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
 ACTION_REPEAT = 10
