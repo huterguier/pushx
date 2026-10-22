@@ -53,6 +53,13 @@ env = PushEnv(
 `combine(*reward_fns, weights=None)` for mixing several together.
 `pushx.termination` includes `pose_threshold(pos_threshold, angle_threshold)`.
 
+By default the goal pose and the initial state are sampled every episode, as in PushT. Pass
+`goal=((x, y), angle)` and/or `spawn=(block_pos, block_angle, pusher_pos)` to fix them; a fixed
+spawn is jittered by `spawn_jitter=(distance, angle)`:
+```python
+env = PushEnv(ASSEMBLIES["T"], goal=((0.6, 0.6), 0.0), spawn=((1.3, 1.3), 0.0, (1.7, 1.7)))
+```
+
 ### Action & Observation Wrappers
 The default action space is an absolute 2D world-coordinate pusher target. `pushx.wrappers` provides
 alternatives, each a `gxm.Wrapper` and therefore composable with one another and with `gxm`'s own wrappers.

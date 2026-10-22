@@ -53,8 +53,35 @@ class PushState(DynamicsState):
 
 
 class PushDynamics(Dynamics[PushState, Step]):
-    def __init__(self, assembly: Assembly):
+    def __init__(
+        self,
+        assembly: Assembly,
+        goal: tuple[jnp.ndarray | tuple[float, float], float] | None = None,
+        spawn: tuple[tuple[float, float], float, tuple[float, float]] | None = None,
+        spawn_jitter: tuple[float, float] = (0.1, 0.3),
+    ):
+        """``goal`` fixes the target pose as ``((x, y), angle)`` for every episode;
+        ``None`` samples a new one per episode, as PushT does. The angle is an
+        assembly angle and is wrapped into the canonical ``[-pi/k, pi/k]`` the
+        observation uses, ``k`` being the assembly's symmetry order.
+
+        ``spawn`` likewise fixes the initial state as ``(block_pos, block_angle,
+        pusher_pos)``; ``None`` samples all three uniformly over the arena, as
+        PushT does. A fixed spawn is jittered by ``spawn_jitter = (distance,
+        angle)``: both positions get a uniform offset within ``±distance`` per
+        axis and the block angle one within ``±angle`` radians."""
         self._assembly = assembly
+        self._spawn = None if spawn is None else tuple(
+            jnp.asarray(v, jnp.float32) for v in spawn
+        )
+        self._spawn_jitter = spawn_jitter
+        if goal is None:
+            self._goal = None
+        else:
+            goal_pos, goal_angle = goal
+            half = jnp.pi / assembly.symmetry_order
+            goal_angle = (jnp.float32(goal_angle) + half) % (2 * half) - half
+            self._goal = (jnp.asarray(goal_pos, jnp.float32).reshape(2), goal_angle)
         n_strokes = len(assembly.strokes)
         n_welds = len(assembly.welds)
         self._static = StaticSimParams(
@@ -195,13 +222,26 @@ class PushDynamics(Dynamics[PushState, Step]):
         # Separate margins: PushT samples the agent from a wider box than the block
         # (50..450px vs 100..400px), so a single shared margin never let the pusher
         # start outside the block's own band.
-        assembly_pos = jax.random.uniform(
-            key_pos, (2,), minval=ASSEMBLY_MARGIN, maxval=SCENE_SIZE - ASSEMBLY_MARGIN
-        )
-        assembly_angle = jax.random.uniform(key_angle, (), minval=-jnp.pi, maxval=jnp.pi)
-        pusher_pos = jax.random.uniform(
-            key_pusher, (2,), minval=PUSHER_MARGIN, maxval=SCENE_SIZE - PUSHER_MARGIN
-        )
+        if self._spawn is None:
+            assembly_pos = jax.random.uniform(
+                key_pos, (2,), minval=ASSEMBLY_MARGIN, maxval=SCENE_SIZE - ASSEMBLY_MARGIN
+            )
+            assembly_angle = jax.random.uniform(key_angle, (), minval=-jnp.pi, maxval=jnp.pi)
+            pusher_pos = jax.random.uniform(
+                key_pusher, (2,), minval=PUSHER_MARGIN, maxval=SCENE_SIZE - PUSHER_MARGIN
+            )
+        else:
+            assembly_pos, assembly_angle, pusher_pos = self._spawn
+            distance, angle = self._spawn_jitter
+            assembly_pos = assembly_pos + jax.random.uniform(
+                key_pos, (2,), minval=-distance, maxval=distance
+            )
+            assembly_angle = assembly_angle + jax.random.uniform(
+                key_angle, (), minval=-angle, maxval=angle
+            )
+            pusher_pos = pusher_pos + jax.random.uniform(
+                key_pusher, (2,), minval=-distance, maxval=distance
+            )
 
         cos_a, sin_a = jnp.cos(assembly_angle), jnp.sin(assembly_angle)
         rot = jnp.array([[cos_a, -sin_a], [sin_a, cos_a]])
@@ -232,6 +272,11 @@ class PushDynamics(Dynamics[PushState, Step]):
         )
         return sim.replace(polygon=poly, circle=circle, joint=joint)
 
+    def _goal_for_episode(self, key: Key) -> tuple[jnp.ndarray, jnp.ndarray]:
+        if self._goal is not None:
+            return self._goal
+        return self._random_goal(key)
+
     def _random_goal(self, key: Key) -> tuple[jnp.ndarray, jnp.ndarray]:
         key_pos, key_angle = jax.random.split(key)
         goal_pos = jax.random.uniform(
@@ -245,7 +290,7 @@ class PushDynamics(Dynamics[PushState, Step]):
     def init(self, key: Key) -> tuple[PushState, Step]:
         key_sim, key_goal = jax.random.split(key)
         sim_state = self._randomise(key_sim)
-        goal_pos, goal_angle = self._random_goal(key_goal)
+        goal_pos, goal_angle = self._goal_for_episode(key_goal)
         state = PushState(sim_state=sim_state, goal_pos=goal_pos, goal_angle=goal_angle)
         return state, Step(
             next_obs=self._obs(sim_state, goal_pos, goal_angle),

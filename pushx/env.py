@@ -17,10 +17,18 @@ class PushEnv(Environment[PushState]):
         assembly: Assembly,
         reward_fn: RewardFn | None = None,
         success_fn: SuccessFn | None = None,
+        goal: tuple[jnp.ndarray | tuple[float, float], float] | None = None,
+        spawn: tuple[tuple[float, float], float, tuple[float, float]] | None = None,
+        spawn_jitter: tuple[float, float] = (0.1, 0.3),
         id: str = "PushX",
     ):
+        """``goal`` fixes the target pose as ``((x, y), angle)`` and ``spawn`` the
+        initial ``(block_pos, block_angle, pusher_pos)``, up to ``spawn_jitter``,
+        instead of sampling them per episode; see :class:`PushDynamics`."""
         self.id = id
-        self._dynamics = PushDynamics(assembly)
+        self._dynamics = PushDynamics(
+            assembly, goal=goal, spawn=spawn, spawn_jitter=spawn_jitter
+        )
         self.observation_space = self._dynamics.observation_space
         self.action_space = self._dynamics.action_space
         self._reward_fn = reward_fn or rewards.sparse_success
