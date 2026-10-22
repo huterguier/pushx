@@ -1,6 +1,6 @@
 """Watch a trained PPO policy push the assembly, resetting after every episode.
 
-Train first with ``python examples/ppo.py`` (saves ``ppo_T.msgpack``), then:
+Train first with ``python examples/ppo.py`` (saves ``checkpoints/ppo_T.msgpack``), then:
 
     python examples/watch.py
 """
@@ -16,7 +16,7 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 from flax import serialization
-from ppo import ACTION_DELTA, SHAPE, ActorCritic
+from ppo import ACTION_DELTA, CHECKPOINTS, SHAPE, ActorCritic
 
 from pushx import ASSEMBLIES, PushEnv
 from pushx.wrappers import RelativeAction
@@ -31,7 +31,7 @@ network = ActorCritic(env.action_space.shape[0])
 key = jax.random.key(0)
 state, timestep = jax.jit(env.init)(key)
 params = network.init(key, timestep.next_obs)
-params_path = Path(__file__).parent / f"ppo_{SHAPE}.msgpack"
+params_path = CHECKPOINTS / f"ppo_{SHAPE}.msgpack"
 params = serialization.from_bytes(params, params_path.read_bytes())
 
 # Sample rather than take the mode: the deterministic action can stall in

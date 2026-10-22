@@ -6,7 +6,7 @@ keeping everything on device — call it in a loop and feed each batch straight
 into a world-model gradient step, carrying ``(state, timestep)`` between calls.
 
 Each environment is driven by one of the policy checkpoints saved by
-``python examples/ppo.py`` (``ppo_T_{epoch}.msgpack``, from untrained to
+``python examples/ppo.py`` (``checkpoints/ppo_T_{epoch}.msgpack``, from untrained to
 converged), except for a RANDOM_FRACTION of environments that take uniform
 random actions. Episodes reset via ``pushx.wrappers.LingerReset``: a few dozen
 steps after success or at a randomized time limit, so resets stay
@@ -29,7 +29,7 @@ import jax
 import jax.numpy as jnp
 from flax import serialization
 from gxm.wrappers.wrapper import WrapperState
-from ppo import ACTION_DELTA, SHAPE, ActorCritic
+from ppo import ACTION_DELTA, CHECKPOINTS, SHAPE, ActorCritic
 
 from pushx import ASSEMBLIES, PushEnv
 from pushx.wrappers import LingerReset, RelativeAction
@@ -46,11 +46,11 @@ network = ActorCritic(env.action_space.shape[0])
 def load_policies(template):
     """Stack all saved checkpoints into one pytree with a leading axis."""
     paths = sorted(
-        Path(__file__).parent.glob(f"ppo_{SHAPE}_[0-9]*.msgpack"),
+        CHECKPOINTS.glob(f"ppo_{SHAPE}_[0-9]*.msgpack"),
         key=lambda p: int(p.stem.rsplit("_", 1)[-1]),
     )
     if not paths:  # no per-epoch checkpoints yet; fall back to the final params
-        paths = [Path(__file__).parent / f"ppo_{SHAPE}.msgpack"]
+        paths = [CHECKPOINTS / f"ppo_{SHAPE}.msgpack"]
     policies = [serialization.from_bytes(template, p.read_bytes()) for p in paths]
     return jax.tree.map(lambda *xs: jnp.stack(xs), *policies)
 

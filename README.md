@@ -86,9 +86,9 @@ env = AutoReset(TimeLimit(PushEnv(ASSEMBLIES["X"]), time_limit=200))
 
 ## Examples
 ```bash
-python examples/play.py         # mouse-driven pusher
-python examples/play_arrows.py  # arrow-key discrete pusher
-python examples/ppo.py          # train a PPO agent (fully jit-compiled)
+python examples/play.py   # mouse-driven pusher
+python examples/ppo.py    # train a PPO agent (fully jit-compiled)
+python examples/watch.py  # watch the trained agent
 ```
 The PPO example uses [`rlax`](https://github.com/huterguier/rlax), which is included in the `examples` extra.
 ```bash

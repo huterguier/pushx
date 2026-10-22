@@ -34,6 +34,7 @@ SHAPE = "P"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
 ACTION_REPEAT = 10  # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
 TIME_LIMIT = 100  # in control steps; at 10 Hz this is 10 seconds per episode
+CHECKPOINTS = Path(__file__).parent / "checkpoints"
 
 
 def featurize(obs):
@@ -130,7 +131,7 @@ if __name__ == "__main__":
     num_epochs = 10
     learning_rate = 1e-4
     config = PPOConfig(
-        num_envs=256,
+        num_envs=2048,
         num_steps_rollout=64,
         num_minibatches=8,
         num_update_epochs=4,
@@ -171,16 +172,19 @@ if __name__ == "__main__":
     optimizer = optax.adam(optax.linear_schedule(learning_rate, 0.0, num_optimizer_steps))
 
     ppo = PPO(config, AutoReset(env), network, optimizer)
+    train = jax.jit(ppo.train, static_argnames="num_steps")
+    evaluate = jax.jit(ppo.evaluate, static_argnames=("num_steps", "num_envs"))
 
     key = jax.random.key(0)
     key, key_init, key_eval, key_gif = jax.random.split(key, 4)
     ppo_state = ppo.init(key_init)
-    Path(f"ppo_{SHAPE}_0.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
-    print("epoch  0:", ppo.evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256))
+    CHECKPOINTS.mkdir(exist_ok=True)
+    (CHECKPOINTS / f"ppo_{SHAPE}_0.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
+    print("epoch  0:", evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256))
     for epoch in range(1, num_epochs + 1):
         key, key_train, key_eval = jax.random.split(key, 3)
-        ppo_state = ppo.train(key_train, ppo_state, num_steps=num_steps // num_epochs)
-        Path(f"ppo_{SHAPE}_{epoch}.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
-        print(f"epoch {epoch:2d}:", ppo.evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256))
-    Path(f"ppo_{SHAPE}.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
+        ppo_state = train(key_train, ppo_state, num_steps=num_steps // num_epochs)
+        (CHECKPOINTS / f"ppo_{SHAPE}_{epoch}.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
+        print(f"epoch {epoch:2d}:", evaluate(key_eval, ppo_state, num_steps=TIME_LIMIT, num_envs=256))
+    (CHECKPOINTS / f"ppo_{SHAPE}.msgpack").write_bytes(serialization.to_bytes(ppo_state.params))
     save_gif(env, ppo_state.params, network, key_gif, f"ppo_{SHAPE}.gif")
