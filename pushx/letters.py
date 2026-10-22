@@ -135,6 +135,43 @@ H = Assembly(
 )
 
 # ---------------------------------------------------------------------------
+# P  (symmetry_order=1 — stem with a closed rectangular bowl at the top right)
+#
+#   Assembly origin = center of stem.
+#   Bowl = top bar + middle bar + right vertical; bars are flush with the stem's
+#   left edge, the right vertical spans the full bowl height.
+# ---------------------------------------------------------------------------
+_P_THK = 0.09
+_P_H = 0.42
+_P_W = 0.28        # total width, stem left edge to bowl right edge
+_P_BOWL_H = 0.25   # outer height of the bowl
+
+_P_BAR_X = _P_W / 2 - _P_THK / 2
+_P_TOP_Y = _P_H / 2 - _P_THK / 2
+_P_MID_Y = _P_H / 2 - _P_BOWL_H + _P_THK / 2
+_P_RIGHT_X = _P_W - _P_THK
+_P_RIGHT_Y = _P_H / 2 - _P_BOWL_H / 2
+
+P = Assembly(
+    strokes=[
+        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_P_THK, _P_H)),                  # stem
+        Stroke(offset=(_P_BAR_X, _P_TOP_Y), angle=0.0, size=(_P_W, _P_THK)),        # top bar
+        Stroke(offset=(_P_BAR_X, _P_MID_Y), angle=0.0, size=(_P_W, _P_THK)),        # middle bar
+        Stroke(offset=(_P_RIGHT_X, _P_RIGHT_Y), angle=0.0, size=(_P_THK, _P_BOWL_H)),  # right vertical
+    ],
+    welds=[
+        Weld(a=0, b=1, a_relative_pos=(0.0, _P_TOP_Y), b_relative_pos=(-_P_BAR_X, 0.0)),
+        Weld(a=0, b=2, a_relative_pos=(0.0, _P_MID_Y), b_relative_pos=(-_P_BAR_X, 0.0)),
+        Weld(a=1, b=3,
+             a_relative_pos=(_P_RIGHT_X - _P_BAR_X, 0.0),
+             b_relative_pos=(0.0, _P_TOP_Y - _P_RIGHT_Y)),
+        # No middle-bar <-> right-vertical weld: closing the loop over-constrains
+        # jax2d's joint solver and produces occasional NaN states.
+    ],
+    symmetry_order=1,
+)
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 ASSEMBLIES: dict[str, Assembly] = {
@@ -144,4 +181,5 @@ ASSEMBLIES: dict[str, Assembly] = {
     "L": L,
     "+": PLUS,
     "H": H,
+    "P": P,
 }

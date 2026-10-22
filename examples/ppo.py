@@ -30,7 +30,7 @@ from gxm.wrappers.wrapper import WrapperState
 from pushx import ASSEMBLIES, PushEnv, rewards
 from pushx.wrappers import ActionRepeat, RelativeAction
 
-SHAPE = "T"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
+SHAPE = "P"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
 ACTION_REPEAT = 10  # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
 TIME_LIMIT = 100  # in control steps; at 10 Hz this is 10 seconds per episode

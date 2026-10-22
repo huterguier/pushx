@@ -12,7 +12,7 @@ A circular pusher shoves a rigid 2D assembly, built out of welded rectangular st
 The whole `init` / `step` / `render` pipeline is `jit`, `vmap` and `scan` friendly.
 
 ## Features
-- 🔤 **Configurable Shapes:** Assemblies are built from welded rectangular strokes, so any letter- or symbol-shaped target (`T`, `X`, `I`, `L`, `+`, `H`, ...) is just a small declarative description away.
+- 🔤 **Configurable Shapes:** Assemblies are built from welded rectangular strokes, so any letter- or symbol-shaped target (`T`, `X`, `I`, `L`, `+`, `H`, `P`, ...) is just a small declarative description away.
 - 🎯 **Pluggable Rewards & Success Criteria:** Swap in sparse, dense, or shaped rewards, and choose how strict "solved" needs to be, without touching the environment itself.
 - 🧩 **Composable Wrappers:** Action-space transforms (normalized, relative, velocity-based, discrete) and pixel observations are `gxm.Wrapper`s, so they stack freely with each other and with `gxm`'s own built-in wrappers.
 - 🖼️ **JAX-native Rendering:** A hand-rolled signed-distance-field rasterizer renders the scene directly in JAX, no external graphics dependencies required.

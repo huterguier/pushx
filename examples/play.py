@@ -13,6 +13,7 @@ from pushx import ASSEMBLIES, PushEnv
 from pushx.wrappers import PixelObservation
 
 SHAPE = "X"  # change to "T", "L", "H", "I", "+", or any key in ASSEMBLIES
+SHAPE = "P"  # change to "T", "L", "H", "I", "+", or any key in ASSEMBLIES
 RENDER_SIZE = 200
 
 env = PixelObservation(PushEnv(ASSEMBLIES[SHAPE]), width=RENDER_SIZE, height=RENDER_SIZE)
