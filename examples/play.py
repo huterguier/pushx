@@ -49,16 +49,16 @@ fig.canvas.mpl_connect("motion_notify_event", on_move)
 
 def update(_):
     global state, key, step_count
-    key, sk = jax.random.split(key)
+    key, key_step = jax.random.split(key)
     action = jnp.array(mouse_pos)
-    state, timestep = step_jit(sk, state, action)
+    state, timestep = step_jit(key_step, state, action)
     step_count += 1
 
     if timestep.terminated:
         title.set_text(f"Solved in {step_count} steps! Resetting...")
         fig.canvas.draw()
-        key, rk = jax.random.split(key)
-        state, timestep = reset_jit(rk, state)
+        key, key_reset = jax.random.split(key)
+        state, timestep = reset_jit(key_reset, state)
         step_count = 0
         title.set_text(f"Move mouse to push {SHAPE}  ({RENDER_SIZE}×{RENDER_SIZE}px)")
 

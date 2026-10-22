@@ -1,4 +1,4 @@
-"""Action-space and observation wrappers for PushEnv, composable with gxm's own wrappers.
+"""Action-space and observation wrappers for PushEnv, composable with gxm's own.
 
 For discrete-direction actions, no wrapper is needed here — compose gxm's own
 `gxm.wrappers.Discretize` directly on top of any of these, e.g.:
@@ -15,16 +15,17 @@ import jax
 import jax.numpy as jnp
 from gxm.core import Timestep
 from gxm.spaces import Box
-from gxm.typing import Key
 from gxm.wrappers import EnvironmentWrapper
 from gxm.wrappers.wrapper import WrapperState
 
 from pushx.dynamics import SCENE_SIZE, PushState
 from pushx.env import PushEnv
+from pushx.typing import Array, Key
 
 
 class NormalizeAction(EnvironmentWrapper[Any]):
-    """Actions are given in [-1, 1]^2 and rescaled to the world-coordinate bounds PushDynamics expects."""
+    """Actions are given in [-1, 1]^2 and rescaled to the world-coordinate bounds
+    PushDynamics expects."""
 
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper):
         super().__init__(wrapped)
@@ -37,7 +38,7 @@ class NormalizeAction(EnvironmentWrapper[Any]):
         return self.wrapped.reset(key, state)
 
     def step(
-        self, key: Key, state: PushState, action: jnp.ndarray
+        self, key: Key, state: PushState, action: Array
     ) -> tuple[PushState, Timestep]:
         world_action = (action + 1.0) * 0.5 * SCENE_SIZE
         state, timestep = self.wrapped.step(key, state, world_action)
@@ -45,7 +46,8 @@ class NormalizeAction(EnvironmentWrapper[Any]):
 
 
 class RelativeAction(EnvironmentWrapper[Any]):
-    """Actions are a delta from the pusher's current position, rather than an absolute world target."""
+    """Actions are a delta from the pusher's current position, rather than an
+    absolute world target."""
 
     def __init__(self, wrapped: PushEnv | EnvironmentWrapper, scale: float = 0.3):
         super().__init__(wrapped)
@@ -61,7 +63,7 @@ class RelativeAction(EnvironmentWrapper[Any]):
         return self.wrapped.reset(key, state)
 
     def step(
-        self, key: Key, state: PushState, action: jnp.ndarray
+        self, key: Key, state: PushState, action: Array
     ) -> tuple[PushState, Timestep]:
         world_action = cast(PushEnv, self.wrapped).pusher_position(state) + action
         state, timestep = self.wrapped.step(key, state, world_action)
@@ -92,7 +94,7 @@ class VelocityAction(EnvironmentWrapper[Any]):
         return self.wrapped.reset(key, state)
 
     def step(
-        self, key: Key, state: PushState, action: jnp.ndarray
+        self, key: Key, state: PushState, action: Array
     ) -> tuple[PushState, Timestep]:
         dt = 0.01  # matches PushDynamics's fixed SimParams.dt
         target_pos = cast(PushEnv, self.wrapped).pusher_position(state) + action * dt
@@ -101,7 +103,7 @@ class VelocityAction(EnvironmentWrapper[Any]):
 
 
 class ActionRepeat(EnvironmentWrapper[Any]):
-    """Hold one action for ``repeat`` simulation steps, lowering the control rate.
+    """Hold one action for ``num_repeats`` simulation steps, lowering the control rate.
 
     ``PushDynamics`` advances a single ``dt = 0.01`` step per call -- the same physics
     dt PushT uses -- so an agent acting every raw step would decide at 100 Hz, far
@@ -112,7 +114,7 @@ class ActionRepeat(EnvironmentWrapper[Any]):
 
     This is the trick PushT uses (``n_steps = 1 / (dt * control_hz)`` substeps per
     env step), without touching the physics: ``dt`` stays 0.01, so contact
-    resolution is unchanged. ``repeat=10`` gives 10 Hz control -- the same
+    resolution is unchanged. ``num_repeats=10`` gives 10 Hz control -- the same
     ``n_steps=10`` substeps of ``dt=0.01`` PushT holds one target across, at
     ``control_hz=10``. With identical ``dt``, identical substep count, and the same
     PD gains, the pusher's discretized step-response now matches PushT's agent
@@ -127,19 +129,18 @@ class ActionRepeat(EnvironmentWrapper[Any]):
 
     Place this directly on ``PushEnv``, inside any action-space wrapper::
 
-        RelativeAction(ActionRepeat(PushEnv(assembly), repeat=10), scale=0.5)
+        RelativeAction(ActionRepeat(PushEnv(assembly), num_repeats=10), scale=0.5)
 
     Outside ``RelativeAction`` the delta would re-apply from each updated pusher
-    position and the pusher would travel ``repeat`` times too far; inside, the
+    position and the pusher would travel ``num_repeats`` times too far; inside, the
     absolute target is held for the whole control step, as PushT holds its target
     across substeps.
     """
 
-    def __init__(self, wrapped: PushEnv | EnvironmentWrapper, repeat: int = 10):
+    def __init__(self, wrapped: PushEnv | EnvironmentWrapper, num_repeats: int = 10):
         super().__init__(wrapped)
-        if repeat < 1:
-            raise ValueError(f"repeat must be >= 1, got {repeat}")
-        self.repeat = repeat
+        assert num_repeats >= 1, f"expected num_repeats >= 1, got {num_repeats}"
+        self.num_repeats = num_repeats
 
     def init(self, key: Key) -> tuple[PushState, Timestep]:
         return self.wrapped.init(key)
@@ -148,11 +149,11 @@ class ActionRepeat(EnvironmentWrapper[Any]):
         return self.wrapped.reset(key, state)
 
     def step(
-        self, key: Key, state: PushState, action: jnp.ndarray
+        self, key: Key, state: PushState, action: Array
     ) -> tuple[PushState, Timestep]:
-        def one(carry, step_key):
+        def one(carry, key):
             state, total, truncated = carry
-            next_state, timestep = self.wrapped.step(step_key, state, action)
+            next_state, timestep = self.wrapped.step(key, state, action)
             state = jax.tree.map(
                 lambda a, b: jnp.where(truncated, a, b), state, next_state
             )
@@ -162,15 +163,18 @@ class ActionRepeat(EnvironmentWrapper[Any]):
         (state, total, truncated), timesteps = jax.lax.scan(
             one,
             (state, jnp.zeros(()), jnp.array(False)),
-            jax.random.split(key, self.repeat),
+            jax.random.split(key, self.num_repeats),
         )
-        last = jnp.where(truncated, jnp.argmax(timesteps.truncated), self.repeat - 1)
+        last = jnp.where(
+            truncated, jnp.argmax(timesteps.truncated), self.num_repeats - 1
+        )
         last = jax.tree.map(lambda x: x[last], timesteps)
         return state, dataclasses.replace(last, reward=total.astype(last.reward.dtype))
 
 
 class PixelObservation(EnvironmentWrapper[Any]):
-    """Replaces the raw-state observation with a rendered (height, width, 3) pixel image."""
+    """Replaces the raw-state observation with a rendered (height, width, 3)
+    pixel image."""
 
     def __init__(
         self, wrapped: PushEnv | EnvironmentWrapper, width: int = 64, height: int = 64
@@ -193,7 +197,7 @@ class PixelObservation(EnvironmentWrapper[Any]):
         return state, self._render_timestep(state, timestep)
 
     def step(
-        self, key: Key, state: PushState, action: jnp.ndarray
+        self, key: Key, state: PushState, action: Array
     ) -> tuple[PushState, Timestep]:
         state, timestep = self.wrapped.step(key, state, action)
         return state, self._render_timestep(state, timestep)
@@ -202,10 +206,10 @@ class PixelObservation(EnvironmentWrapper[Any]):
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass
 class LingerResetState(WrapperState):
-    steps: jnp.ndarray
-    limit: jnp.ndarray
-    linger: jnp.ndarray
-    started: jnp.ndarray
+    num_steps: Array
+    limit: Array
+    linger: Array
+    started: Array
 
 
 class LingerReset(EnvironmentWrapper[LingerResetState]):
@@ -217,8 +221,9 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
     ``info["success"]`` and ``terminated`` is always False. Instead the episode
     truncates — and, like ``gxm.wrappers.TimeLimit``, resets itself — ``linger``
     steps after success is first reached, at ``time_limit`` steps, or when the
-    wrapped env truncates (e.g. out of bounds), whichever comes first. The linger countdown starts at the first success and does not
-    restart if the assembly leaves and re-enters the goal region.
+    wrapped env truncates (e.g. out of bounds), whichever comes first. The linger
+    countdown starts at the first success and does not restart if the assembly
+    leaves and re-enters the goal region.
 
     ``time_limit`` and ``linger`` may each be an int (fixed), a ``(low, high)``
     tuple sampled uniformly from ``[low, high)`` per episode, or ``None`` to
@@ -239,7 +244,7 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         self.linger = linger
 
     @staticmethod
-    def _sample(key: Key, value: int | tuple[int, int] | None) -> jnp.ndarray:
+    def _sample(key: Key, value: int | tuple[int, int] | None) -> Array:
         if value is None:
             return jnp.array(jnp.iinfo(jnp.int32).max, dtype=jnp.int32)
         if isinstance(value, tuple):
@@ -250,7 +255,7 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         key_limit, key_linger = jax.random.split(key)
         return LingerResetState(
             wrapped_state=wrapped_state,
-            steps=jnp.array(0, dtype=jnp.int32),
+            num_steps=jnp.array(0, dtype=jnp.int32),
             limit=self._sample(key_limit, self.time_limit),
             linger=self._sample(key_linger, self.linger),
             started=jnp.array(False, dtype=jnp.bool),
@@ -276,7 +281,7 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         return self._new_state(key_sample, wrapped_state), self._mark_success(timestep)
 
     def step(
-        self, key: Key, state: LingerResetState, action: jnp.ndarray
+        self, key: Key, state: LingerResetState, action: Array
     ) -> tuple[LingerResetState, Timestep]:
         key_step, key_reset, key_sample = jax.random.split(key, 3)
         wrapped_state, timestep = self.wrapped.step(
@@ -286,14 +291,14 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         success = timestep.terminated
         started = state.started | success
         linger = jnp.where(started, state.linger - 1, state.linger)
-        steps = state.steps + 1
+        num_steps = state.num_steps + 1
         expired = (
-            timestep.truncated | (steps >= state.limit) | (started & (linger <= 0))
+            timestep.truncated | (num_steps >= state.limit) | (started & (linger <= 0))
         )
 
         step_state = LingerResetState(
             wrapped_state=wrapped_state,
-            steps=steps,
+            num_steps=num_steps,
             limit=state.limit,
             linger=linger,
             started=started,
@@ -313,8 +318,8 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
             truncated=jnp.ones_like(timestep.truncated),
             info={**timestep.info, "success": success},
         )
-        return jax.lax.cond(
-            expired,
-            lambda: (reset_state, reset_timestep),
-            lambda: (step_state, step_timestep),
+        return jax.tree.map(
+            lambda a, b: jnp.where(expired, a, b),
+            (reset_state, reset_timestep),
+            (step_state, step_timestep),
         )

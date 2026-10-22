@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 
 from pushx.dynamics import PushState
+from pushx.typing import Array
 
 if TYPE_CHECKING:
     from pushx.env import PushEnv
 
-RewardFn = Callable[["PushEnv", PushState, PushState], jnp.ndarray]
+type RewardFn = Callable[[PushEnv, PushState, PushState], Array]
 
 
-def sparse_success(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
+def sparse_success(env: PushEnv, state: PushState, new_state: PushState) -> Array:
+    del state
     return env.success(new_state).astype(jnp.float32)
 
 
 def dense_distance(pos_weight: float = 1.0, angle_weight: float = 1.0) -> RewardFn:
-    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
+    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> Array:
+        del state
         pos_err, angle_err = env.error(new_state)
         return -(pos_weight * pos_err + angle_weight * angle_err)
 
@@ -27,7 +31,7 @@ def dense_distance(pos_weight: float = 1.0, angle_weight: float = 1.0) -> Reward
 
 
 def potential_shaping(pos_weight: float = 1.0, angle_weight: float = 1.0) -> RewardFn:
-    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
+    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> Array:
         prev_pos_err, prev_angle_err = env.error(state)
         curr_pos_err, curr_angle_err = env.error(new_state)
         improvement = (prev_pos_err - curr_pos_err) * pos_weight + (
@@ -45,7 +49,7 @@ def pusher_approach(weight: float = 0.5) -> RewardFn:
     assembly, which makes exploration from scratch (e.g. PPO) extremely slow.
     """
 
-    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
+    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> Array:
         prev = jnp.linalg.norm(
             env.pusher_position(state) - env.assembly_position(state)
         )
@@ -58,7 +62,8 @@ def pusher_approach(weight: float = 0.5) -> RewardFn:
 
 
 def step_penalty(penalty: float = 0.01) -> RewardFn:
-    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
+    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> Array:
+        del env, state, new_state
         return -jnp.float32(penalty)
 
     return reward_fn
@@ -67,7 +72,10 @@ def step_penalty(penalty: float = 0.01) -> RewardFn:
 def combine(*reward_fns: RewardFn, weights: list[float] | None = None) -> RewardFn:
     weights_ = weights if weights is not None else [1.0] * len(reward_fns)
 
-    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> jnp.ndarray:
-        return sum(w * f(env, state, new_state) for w, f in zip(weights_, reward_fns))
+    def reward_fn(env: PushEnv, state: PushState, new_state: PushState) -> Array:
+        return sum(
+            w * f(env, state, new_state)
+            for w, f in zip(weights_, reward_fns, strict=True)
+        )
 
     return reward_fn

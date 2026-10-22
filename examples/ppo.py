@@ -31,9 +31,8 @@ from pushx.wrappers import ActionRepeat, RelativeAction
 
 SHAPE = "P"  # change to "X", "L", "H", "I", "+", or any key in ASSEMBLIES
 ACTION_DELTA = 0.5  # policy outputs an offset from the pusher, not an absolute target
-ACTION_REPEAT = (
-    10  # hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
-)
+# hold each action 10 sim steps (dt=0.01) -> 10 Hz control, as PushT does
+ACTION_REPEAT = 10
 TIME_LIMIT = 100  # in control steps; at 10 Hz this is 10 seconds per episode
 CHECKPOINTS = Path(__file__).parent / "checkpoints"
 
@@ -73,7 +72,7 @@ def featurize(obs):
 
 
 class ActorCritic(nn.Module):
-    n_actions: int
+    num_actions: int
 
     @nn.compact
     def __call__(self, obs):
@@ -81,10 +80,10 @@ class ActorCritic(nn.Module):
         x = nn.tanh(nn.Dense(features=256)(x))
         x = nn.tanh(nn.Dense(features=256)(x))
         mean = ACTION_DELTA * nn.tanh(
-            nn.Dense(self.n_actions, kernel_init=nn.initializers.orthogonal(0.01))(x)
+            nn.Dense(self.num_actions, kernel_init=nn.initializers.orthogonal(0.01))(x)
         )
         log_std = self.param(
-            "log_std", nn.initializers.constant(-0.7), (self.n_actions,)
+            "log_std", nn.initializers.constant(-0.7), (self.num_actions,)
         )
         std = jnp.broadcast_to(jnp.exp(log_std), mean.shape)
         value = nn.Dense(features=1)(x)
@@ -164,7 +163,8 @@ if __name__ == "__main__":
             # inside RelativeAction: the absolute target is held for the whole
             # control step, rather than the delta re-applying every sim step
             ActionRepeat(
-                PushEnv(ASSEMBLIES[SHAPE], reward_fn=reward_fn), repeat=ACTION_REPEAT
+                PushEnv(ASSEMBLIES[SHAPE], reward_fn=reward_fn),
+                num_repeats=ACTION_REPEAT,
             ),
             scale=ACTION_DELTA,
         ),

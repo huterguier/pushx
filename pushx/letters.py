@@ -23,20 +23,20 @@ _BAR_W, _BAR_H = 120.0 * _PUSHT_PX_SCALE, 30.0 * _PUSHT_PX_SCALE
 _STEM_W, _STEM_H = 30.0 * _PUSHT_PX_SCALE, 90.0 * _PUSHT_PX_SCALE
 
 T = Assembly(
-    strokes=[
+    strokes=(
         Stroke(offset=(0.0, -_BAR_H / 2), angle=0.0, size=(_BAR_W, _BAR_H)),
         Stroke(
             offset=(0.0, -(_BAR_H + _STEM_H / 2)), angle=0.0, size=(_STEM_W, _STEM_H)
         ),
-    ],
-    welds=[
+    ),
+    welds=(
         Weld(
             a=0,
             b=1,
             a_relative_pos=(0.0, -_BAR_H / 2),
             b_relative_pos=(0.0, _STEM_H / 2),
         ),
-    ],
+    ),
     symmetry_order=1,
 )
 
@@ -46,13 +46,11 @@ T = Assembly(
 _X_LEN, _X_THK = 0.45, 0.09
 
 X = Assembly(
-    strokes=[
+    strokes=(
         Stroke(offset=(0.0, 0.0), angle=math.pi / 4, size=(_X_LEN, _X_THK)),
         Stroke(offset=(0.0, 0.0), angle=-math.pi / 4, size=(_X_LEN, _X_THK)),
-    ],
-    welds=[
-        Weld(a=0, b=1, a_relative_pos=(0.0, 0.0), b_relative_pos=(0.0, 0.0)),
-    ],
+    ),
+    welds=(Weld(a=0, b=1, a_relative_pos=(0.0, 0.0), b_relative_pos=(0.0, 0.0)),),
     symmetry_order=4,
 )
 
@@ -62,10 +60,8 @@ X = Assembly(
 _I_W, _I_H = 0.09, 0.45
 
 I = Assembly(
-    strokes=[
-        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_I_W, _I_H)),
-    ],
-    welds=[],
+    strokes=(Stroke(offset=(0.0, 0.0), angle=0.0, size=(_I_W, _I_H)),),
+    welds=(),
     symmetry_order=2,
 )
 
@@ -80,7 +76,7 @@ _L_H = 0.38
 _L_ARM = 0.22
 
 L = Assembly(
-    strokes=[
+    strokes=(
         Stroke(offset=(0.0, 0.0), angle=0.0, size=(_L_THK, _L_H)),
         # Arm left edge flush with vertical left edge: shift center left by _L_THK/2.
         # Arm bottom edge flush with vertical bottom: shift center up by _L_THK/2.
@@ -89,15 +85,15 @@ L = Assembly(
             angle=0.0,
             size=(_L_ARM, _L_THK),
         ),
-    ],
-    welds=[
+    ),
+    welds=(
         Weld(
             a=0,
             b=1,
             a_relative_pos=(0.0, -_L_H / 2 + _L_THK / 2),
             b_relative_pos=(-_L_ARM / 2 + _L_THK / 2, 0.0),
         ),
-    ],
+    ),
     symmetry_order=1,
 )
 
@@ -110,13 +106,11 @@ L = Assembly(
 _PLUS_LEN, _PLUS_THK = 0.42, 0.09
 
 PLUS = Assembly(
-    strokes=[
+    strokes=(
         Stroke(offset=(0.0, 0.0), angle=0.0, size=(_PLUS_LEN, _PLUS_THK)),
         Stroke(offset=(0.0, 0.0), angle=math.pi / 2, size=(_PLUS_LEN, _PLUS_THK)),
-    ],
-    welds=[
-        Weld(a=0, b=1, a_relative_pos=(0.0, 0.0), b_relative_pos=(0.0, 0.0)),
-    ],
+    ),
+    welds=(Weld(a=0, b=1, a_relative_pos=(0.0, 0.0), b_relative_pos=(0.0, 0.0)),),
     symmetry_order=4,
 )
 
@@ -131,18 +125,16 @@ _H_H = 0.40
 _H_W = 0.30  # center-to-center distance between the two verticals
 
 H = Assembly(
-    strokes=[
-        Stroke(
-            offset=(-_H_W / 2, 0.0), angle=0.0, size=(_H_THK, _H_H)
-        ),  # left vertical
-        Stroke(
-            offset=(_H_W / 2, 0.0), angle=0.0, size=(_H_THK, _H_H)
-        ),  # right vertical
-        # Crossbar spans full center-to-center width so it overlaps into both verticals,
-        # eliminating the internal border lines at the junctions.
-        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_H_W, _H_THK)),  # crossbar
-    ],
-    welds=[
+    strokes=(
+        # left vertical
+        Stroke(offset=(-_H_W / 2, 0.0), angle=0.0, size=(_H_THK, _H_H)),
+        # right vertical
+        Stroke(offset=(_H_W / 2, 0.0), angle=0.0, size=(_H_THK, _H_H)),
+        # Crossbar spans full center-to-center width so it overlaps into both
+        # verticals, eliminating the internal border lines at the junctions.
+        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_H_W, _H_THK)),
+    ),
+    welds=(
         Weld(
             a=0,
             b=2,
@@ -155,7 +147,7 @@ H = Assembly(
             a_relative_pos=(-_H_THK / 2, 0.0),
             b_relative_pos=(_H_W / 2 - _H_THK / 2, 0.0),
         ),
-    ],
+    ),
     symmetry_order=2,
 )
 
@@ -178,17 +170,17 @@ _P_RIGHT_X = _P_W - _P_THK
 _P_RIGHT_Y = _P_H / 2 - _P_BOWL_H / 2
 
 P = Assembly(
-    strokes=[
-        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_P_THK, _P_H)),  # stem
-        Stroke(offset=(_P_BAR_X, _P_TOP_Y), angle=0.0, size=(_P_W, _P_THK)),  # top bar
-        Stroke(
-            offset=(_P_BAR_X, _P_MID_Y), angle=0.0, size=(_P_W, _P_THK)
-        ),  # middle bar
-        Stroke(
-            offset=(_P_RIGHT_X, _P_RIGHT_Y), angle=0.0, size=(_P_THK, _P_BOWL_H)
-        ),  # right vertical
-    ],
-    welds=[
+    strokes=(
+        # stem
+        Stroke(offset=(0.0, 0.0), angle=0.0, size=(_P_THK, _P_H)),
+        # top bar
+        Stroke(offset=(_P_BAR_X, _P_TOP_Y), angle=0.0, size=(_P_W, _P_THK)),
+        # middle bar
+        Stroke(offset=(_P_BAR_X, _P_MID_Y), angle=0.0, size=(_P_W, _P_THK)),
+        # right vertical
+        Stroke(offset=(_P_RIGHT_X, _P_RIGHT_Y), angle=0.0, size=(_P_THK, _P_BOWL_H)),
+    ),
+    welds=(
         Weld(a=0, b=1, a_relative_pos=(0.0, _P_TOP_Y), b_relative_pos=(-_P_BAR_X, 0.0)),
         Weld(a=0, b=2, a_relative_pos=(0.0, _P_MID_Y), b_relative_pos=(-_P_BAR_X, 0.0)),
         Weld(
@@ -199,7 +191,7 @@ P = Assembly(
         ),
         # No middle-bar <-> right-vertical weld: closing the loop over-constrains
         # jax2d's joint solver and produces occasional NaN states.
-    ],
+    ),
     symmetry_order=1,
 )
 

@@ -13,6 +13,7 @@ from pushx.dynamics import (
     WALL_THICKNESS,
 )
 from pushx.shapes import Assembly
+from pushx.typing import Array
 
 # pymunk's pygame debug-draw renders every shape two-toned: outline in the exact
 # requested color, fill lightened by 1.2x (clamped) -- confirmed by sampling actual
@@ -45,7 +46,7 @@ def _render_pixels(
     pusher_idx: int,
     width: int = 64,
     height: int = 64,
-) -> jnp.ndarray:
+) -> Array:
     """JAX-native renderer. Returns (H, W, 3) float32 in [0, 1]. Jit/vmap-compatible."""
     xs = jnp.linspace(0, SCENE_SIZE, width)
     ys = jnp.linspace(SCENE_SIZE, 0, height)
@@ -91,7 +92,7 @@ def _render_pixels(
     # every *shape* its own outline, so PushT's T carries a seam line where the stem
     # meets the bar, and the union this used to compute erased it. Drawing per stroke
     # reproduces the seam and drops the silhouette inflation the union needed.
-    for stroke, idx in zip(assembly.strokes, stroke_indices):
+    for stroke, idx in zip(assembly.strokes, stroke_indices, strict=True):
         pos = state.sim_state.polygon.position[idx]
         angle = state.sim_state.polygon.rotation[idx]
         stroke_sdf = _rect_sdf(_rect_local(pixels, pos, angle), stroke.size)
@@ -130,21 +131,19 @@ def _render_pixels(
     return img
 
 
-def _smoothstep(edge0: float, edge1: float, x: jnp.ndarray) -> jnp.ndarray:
+def _smoothstep(edge0: float, edge1: float, x: Array) -> Array:
     t = jnp.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
 
 
-def _rect_sdf(p_local: jnp.ndarray, size: tuple[float, float]) -> jnp.ndarray:
+def _rect_sdf(p_local: Array, size: tuple[float, float]) -> Array:
     q = jnp.abs(p_local) - jnp.array([size[0] / 2, size[1] / 2])
     return jnp.linalg.norm(jnp.maximum(q, 0), axis=-1) + jnp.minimum(
         jnp.maximum(q[..., 0], q[..., 1]), 0
     )
 
 
-def _rect_local(
-    pixels: jnp.ndarray, center: jnp.ndarray, angle: jnp.ndarray
-) -> jnp.ndarray:
+def _rect_local(pixels: Array, center: Array, angle: Array) -> Array:
     cos_a, sin_a = jnp.cos(-angle), jnp.sin(-angle)
     R_inv = jnp.array([[cos_a, -sin_a], [sin_a, cos_a]])
     return jnp.einsum("ij,...j->...i", R_inv, pixels - center)

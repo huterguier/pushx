@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import jax
 import jax.numpy as jnp
 from gxm import Dynamics, DynamicsState, Step
 from gxm.spaces import Box
-from gxm.typing import Key
 from jax2d.engine import PhysicsEngine, create_empty_sim
 from jax2d.scene import (
     add_circle_to_scene,
@@ -16,18 +15,18 @@ from jax2d.scene import (
 from jax2d.sim_state import SimParams, SimState, StaticSimParams
 
 from pushx.shapes import Assembly
+from pushx.typing import Array, Key
 
 SCENE_SIZE = 2.0
-_N_STATIC = 4  # jax2d's num_static_fixated_polys
+_NUM_STATIC = 4  # jax2d's num_static_fixated_polys
 
 # swm/PushT's pymunk scene lives in a 512px window; this is the scale factor that maps
 # its pixel-space geometry onto pushx's SCENE_SIZE world, so shapes sized from PushT's
 # pixel constants (see letters.py's T) and the pusher radius below land at the same
 # proportions.
 _PUSHT_PX_SCALE = SCENE_SIZE / 512.0
-PUSHER_RADIUS = (
-    15.0 * _PUSHT_PX_SCALE
-)  # PushT agent: base_radius=0.375 * scale=40 = 15px
+# PushT agent: base_radius=0.375 * scale=40 = 15px
+PUSHER_RADIUS = 15.0 * _PUSHT_PX_SCALE
 
 # PushT bounds its arena with 4 static wall segments at its window's [5, 506]px margins
 # (radius=2, so 4px thick). Module-level because `render` draws them too -- PushT's
@@ -54,59 +53,63 @@ from pushx.render import _render_pixels  # noqa: E402
 @dataclass
 class PushState(DynamicsState):
     sim_state: SimState
-    goal_pos: jnp.ndarray  # (2,)
-    goal_angle: jnp.ndarray  # ()
+    goal_pos: Array  # (2,)
+    goal_angle: Array  # ()
 
 
+def _derived():
+    return field(init=False, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
 class PushDynamics(Dynamics[PushState, Step]):
-    def __init__(
-        self,
-        assembly: Assembly,
-        goal: tuple[jnp.ndarray | tuple[float, float], float] | None = None,
-        spawn: tuple[tuple[float, float], float, tuple[float, float]] | None = None,
-        spawn_jitter: tuple[float, float] = (0.1, 0.3),
-    ):
-        """``goal`` fixes the target pose as ``((x, y), angle)`` for every episode;
-        ``None`` samples a new one per episode, as PushT does. The angle is an
-        assembly angle and is wrapped into the canonical ``[-pi/k, pi/k]`` the
-        observation uses, ``k`` being the assembly's symmetry order.
+    """``goal`` fixes the target pose as ``((x, y), angle)`` for every episode;
+    ``None`` samples a new one per episode, as PushT does. The angle is an
+    assembly angle and is wrapped into the canonical ``[-pi/k, pi/k]`` the
+    observation uses, ``k`` being the assembly's symmetry order.
 
-        ``spawn`` likewise fixes the initial state as ``(block_pos, block_angle,
-        pusher_pos)``; ``None`` samples all three uniformly over the arena, as
-        PushT does. A fixed spawn is jittered by ``spawn_jitter = (distance,
-        angle)``: both positions get a uniform offset within ``±distance`` per
-        axis and the block angle one within ``±angle`` radians."""
-        self._assembly = assembly
-        self._spawn = (
-            None if spawn is None else tuple(jnp.asarray(v, jnp.float32) for v in spawn)
-        )
-        self._spawn_jitter = spawn_jitter
-        if goal is None:
-            self._goal = None
-        else:
-            goal_pos, goal_angle = goal
-            half = jnp.pi / assembly.symmetry_order
-            goal_angle = (jnp.float32(goal_angle) + half) % (2 * half) - half
-            self._goal = (jnp.asarray(goal_pos, jnp.float32).reshape(2), goal_angle)
-        n_strokes = len(assembly.strokes)
-        n_welds = len(assembly.welds)
-        self._static = StaticSimParams(
-            num_polygons=_N_STATIC + n_strokes,
-            num_circles=2,  # jax2d requires at least 2 circle slots; we only use 1 (the pusher)
-            num_joints=max(n_welds, 1),  # jax2d requires at least 1 joint slot
+    ``spawn`` likewise fixes the initial state as ``(block_pos, block_angle,
+    pusher_pos)``; ``None`` samples all three uniformly over the arena, as
+    PushT does. A fixed spawn is jittered by ``spawn_jitter = (distance,
+    angle)``: both positions get a uniform offset within ``±distance`` per
+    axis and the block angle one within ``±angle`` radians."""
+
+    assembly: Assembly
+    goal: tuple[tuple[float, float], float] | None = None
+    spawn: tuple[tuple[float, float], float, tuple[float, float]] | None = None
+    spawn_jitter: tuple[float, float] = (0.1, 0.3)
+
+    observation_space: Box = _derived()
+    action_space: Box = _derived()
+    _static: StaticSimParams = _derived()
+    _params: SimParams = _derived()
+    _engine: PhysicsEngine = _derived()
+    _base_sim_state: SimState = _derived()
+    _stroke_indices: list[int] = _derived()
+    _pusher_idx: int = _derived()
+
+    def __post_init__(self):
+        num_strokes = len(self.assembly.strokes)
+        num_welds = len(self.assembly.welds)
+        static = StaticSimParams(
+            num_polygons=_NUM_STATIC + num_strokes,
+            # jax2d requires at least 2 circle slots; we only use 1 (the pusher)
+            num_circles=2,
+            num_joints=max(num_welds, 1),  # jax2d requires at least 1 joint slot
             num_thrusters=1,
             max_polygon_vertices=4,
         )
-        self._params = SimParams(
-            dt=0.01
-        )  # matches PushT's physics dt exactly (see ActionRepeat)
-        self._engine = PhysicsEngine(self._static)
-        self._base_sim_state, self._stroke_indices, self._pusher_idx = (
-            self._build_scene()
-        )
+        object.__setattr__(self, "_static", static)
+        # matches PushT's physics dt exactly (see ActionRepeat)
+        object.__setattr__(self, "_params", SimParams(dt=0.01))
+        object.__setattr__(self, "_engine", PhysicsEngine(static))
+        base_sim_state, stroke_indices, pusher_idx = self._build_scene()
+        object.__setattr__(self, "_base_sim_state", base_sim_state)
+        object.__setattr__(self, "_stroke_indices", stroke_indices)
+        object.__setattr__(self, "_pusher_idx", pusher_idx)
 
-        goal_angle_bound = jnp.pi / assembly.symmetry_order
-        self.observation_space = Box(
+        goal_angle_bound = jnp.pi / self.assembly.symmetry_order
+        observation_space = Box(
             low=jnp.array([0.0, 0.0, -jnp.pi, 0.0, 0.0, 0.0, 0.0, -goal_angle_bound]),
             high=jnp.array(
                 [
@@ -122,11 +125,9 @@ class PushDynamics(Dynamics[PushState, Step]):
             ),
             shape=(8,),
         )
-        self.action_space = Box(
-            low=jnp.zeros(2),
-            high=jnp.full(2, SCENE_SIZE),
-            shape=(2,),
-        )
+        action_space = Box(low=jnp.zeros(2), high=jnp.full(2, SCENE_SIZE), shape=(2,))
+        object.__setattr__(self, "observation_space", observation_space)
+        object.__setattr__(self, "action_space", action_space)
 
     def _build_scene(self):
         sim_state = create_empty_sim(
@@ -139,7 +140,7 @@ class PushDynamics(Dynamics[PushState, Step]):
         center = jnp.full(2, SCENE_SIZE / 2)
 
         # Frictionless, like everything else here -- see the stroke loop's friction
-        # comment. `_N_STATIC` was already reserved for exactly this; walls fill it
+        # comment. `_NUM_STATIC` was already reserved for exactly this; walls fill it
         # first so strokes/joints/pusher indices are unaffected. Geometry is the
         # module-level WALL_* so `render` draws the same walls the physics uses.
         long_side = WALL_SPAN + WALL_THICKNESS
@@ -161,7 +162,7 @@ class PushDynamics(Dynamics[PushState, Step]):
             )
 
         stroke_indices = []
-        for stroke in self._assembly.strokes:
+        for stroke in self.assembly.strokes:
             pos = center + jnp.array(stroke.offset)
             # PushT builds each stroke as a separate pymunk Poly with mass=1 fixed
             # (moment_for_poly(1, vertices)), regardless of the piece's area -- not a
@@ -175,20 +176,21 @@ class PushDynamics(Dynamics[PushState, Step]):
                 dimensions=jnp.array(stroke.size),
                 rotation=stroke.angle,
                 density=1.0 / area,
-                # PushT sets `body.friction` (not `shape.friction`) on its blocks/agent/
-                # walls, which pymunk's Body has no such attribute for -- it's silently
-                # ignored, so every contact in PushT is actually frictionless (shape
-                # friction defaults to 0.0). Matched here rather than the shape.friction=1
-                # the code visually appears to ask for.
+                # PushT sets `body.friction` (not `shape.friction`) on its
+                # blocks/agent/walls, which pymunk's Body has no such attribute
+                # for -- it's silently ignored, so every contact in PushT is
+                # actually frictionless (shape friction defaults to 0.0). Matched
+                # here rather than the shape.friction=1 the code visually appears
+                # to ask for.
                 friction=0.0,
                 restitution=0.0,
             )
             stroke_indices.append(idx)
 
-        for weld in self._assembly.welds:
+        for weld in self.assembly.welds:
             ref_angle = (
-                self._assembly.strokes[weld.b].angle
-                - self._assembly.strokes[weld.a].angle
+                self.assembly.strokes[weld.b].angle
+                - self.assembly.strokes[weld.a].angle
             )
             sim_state, joint_idx = add_fixed_joint_to_scene(
                 sim_state,
@@ -209,38 +211,38 @@ class PushDynamics(Dynamics[PushState, Step]):
             self._static,
             position=jnp.array([SCENE_SIZE * 0.7, SCENE_SIZE / 2]),
             radius=PUSHER_RADIUS,
-            friction=0.0,  # PushT's agent is frictionless too -- see the stroke loop's comment above
+            # PushT's agent is frictionless too -- see the stroke loop's comment above
+            friction=0.0,
             restitution=0.0,
-            fixated=True,  # kinematic: infinite mass, so contact can't knock the pusher off its commanded velocity
+            # kinematic: infinite mass, so contact can't knock the pusher off its
+            # commanded velocity
+            fixated=True,
         )
 
         return sim_state, stroke_indices, pusher_idx
 
-    def _obs(
-        self, sim_state: SimState, goal_pos: jnp.ndarray, goal_angle: jnp.ndarray
-    ) -> jnp.ndarray:
+    def _obs(self, sim_state: SimState, goal_pos: Array, goal_angle: Array) -> Array:
         root_pos = sim_state.polygon.position[self._stroke_indices[0]]
-        # Report assembly angle (= world angle - stroke_0 offset) so it's comparable to goal_angle
+        # Report assembly angle (= world angle - stroke_0 offset) so it's comparable
+        # to goal_angle
         assembly_angle = (
             sim_state.polygon.rotation[self._stroke_indices[0]]
-            - self._assembly.strokes[0].angle
+            - self.assembly.strokes[0].angle
         )
         pusher_pos = sim_state.circle.position[self._pusher_idx]
         return jnp.concatenate(
             [root_pos, assembly_angle[None], pusher_pos, goal_pos, goal_angle[None]]
         )
 
-    def _rigidify(
-        self, position: jnp.ndarray, rotation: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def _rigidify(self, position: Array, rotation: Array) -> tuple[Array, Array]:
         # PushT's block is a single rigid body carrying several shapes; here it is
         # several bodies held by jax2d's soft fixed joints, which the fixated pusher
         # can tear apart by crushing the block into a wall -- after which the solver
         # diverges to NaN. Snap the strokes back onto their mean rigid pose every step
         # (strokes have equal mass, so the plain mean preserves the center of mass).
         idx = jnp.array(self._stroke_indices)
-        offsets = jnp.array([s.offset for s in self._assembly.strokes])
-        angles = jnp.array([s.angle for s in self._assembly.strokes])
+        offsets = jnp.array([s.offset for s in self.assembly.strokes])
+        angles = jnp.array([s.angle for s in self.assembly.strokes])
         estimates = rotation[idx] - angles
         spread = (estimates - estimates[0] + jnp.pi) % (2 * jnp.pi) - jnp.pi
         angle = estimates[0] + jnp.mean(spread)
@@ -257,7 +259,7 @@ class PushDynamics(Dynamics[PushState, Step]):
         # Separate margins: PushT samples the agent from a wider box than the block
         # (50..450px vs 100..400px), so a single shared margin never let the pusher
         # start outside the block's own band.
-        if self._spawn is None:
+        if self.spawn is None:
             assembly_pos = jax.random.uniform(
                 key_pos,
                 (2,),
@@ -274,8 +276,10 @@ class PushDynamics(Dynamics[PushState, Step]):
                 maxval=SCENE_SIZE - PUSHER_MARGIN,
             )
         else:
-            assembly_pos, assembly_angle, pusher_pos = self._spawn
-            distance, angle = self._spawn_jitter
+            assembly_pos, assembly_angle, pusher_pos = (
+                jnp.asarray(v, jnp.float32) for v in self.spawn
+            )
+            distance, angle = self.spawn_jitter
             assembly_pos = assembly_pos + jax.random.uniform(
                 key_pos, (2,), minval=-distance, maxval=distance
             )
@@ -292,7 +296,9 @@ class PushDynamics(Dynamics[PushState, Step]):
         sim = self._base_sim_state
         positions = sim.polygon.position
         rotations = sim.polygon.rotation
-        for stroke, idx in zip(self._assembly.strokes, self._stroke_indices):
+        for stroke, idx in zip(
+            self.assembly.strokes, self._stroke_indices, strict=True
+        ):
             world_pos = assembly_pos + rot @ jnp.array(stroke.offset)
             world_angle = assembly_angle + stroke.angle
             positions = positions.at[idx].set(world_pos)
@@ -315,18 +321,22 @@ class PushDynamics(Dynamics[PushState, Step]):
         )
         return sim.replace(polygon=poly, circle=circle, joint=joint)
 
-    def _goal_for_episode(self, key: Key) -> tuple[jnp.ndarray, jnp.ndarray]:
-        if self._goal is not None:
-            return self._goal
-        return self._random_goal(key)
+    def _goal_for_episode(self, key: Key) -> tuple[Array, Array]:
+        if self.goal is None:
+            return self._random_goal(key)
+        goal_pos, goal_angle = self.goal
+        half = jnp.pi / self.assembly.symmetry_order
+        goal_angle = (jnp.float32(goal_angle) + half) % (2 * half) - half
+        return jnp.asarray(goal_pos, jnp.float32).reshape(2), goal_angle
 
-    def _random_goal(self, key: Key) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def _random_goal(self, key: Key) -> tuple[Array, Array]:
         key_pos, key_angle = jax.random.split(key)
         goal_pos = jax.random.uniform(
             key_pos, (2,), minval=GOAL_MARGIN, maxval=SCENE_SIZE - GOAL_MARGIN
         )
-        # Sample from canonical range [−π/k, π/k] so goal_angle is unambiguous in raw obs
-        half = jnp.pi / self._assembly.symmetry_order
+        # Sample from canonical range [−π/k, π/k] so goal_angle is unambiguous in
+        # raw obs
+        half = jnp.pi / self.assembly.symmetry_order
         goal_angle = jax.random.uniform(key_angle, (), minval=-half, maxval=half)
         return goal_pos, goal_angle
 
@@ -342,15 +352,16 @@ class PushDynamics(Dynamics[PushState, Step]):
         )
 
     def reset(self, key: Key, state: PushState) -> tuple[PushState, Step]:
-        return self.init(key)  # state is ignored; full re-randomisation on every reset
+        del state  # full re-randomisation on every reset
+        return self.init(key)
 
-    def step(
-        self, key: Key, state: PushState, action: jnp.ndarray
-    ) -> tuple[PushState, Step]:
-        # PD control toward `action` (an absolute world-space target), matching PushT's
-        # agent controller: k_p/k_v are time constants (1/s^2, 1/s) and so are independent
-        # of SCENE_SIZE's coordinate scale -- these are the same gains PushT uses on its
-        # 512px window. k_p=100, k_v=20 is critically damped (zeta = k_v / (2*sqrt(k_p)) = 1).
+    def step(self, key: Key, state: PushState, action: Array) -> tuple[PushState, Step]:
+        del key
+        # PD control toward `action` (an absolute world-space target), matching
+        # PushT's agent controller: k_p/k_v are time constants (1/s^2, 1/s) and so
+        # are independent of SCENE_SIZE's coordinate scale -- these are the same
+        # gains PushT uses on its 512px window. k_p=100, k_v=20 is critically
+        # damped (zeta = k_v / (2*sqrt(k_p)) = 1).
         k_p, k_v = 100.0, 20.0
         pusher_pos = state.sim_state.circle.position[self._pusher_idx]
         pusher_vel = state.sim_state.circle.velocity[self._pusher_idx]
@@ -397,9 +408,7 @@ class PushDynamics(Dynamics[PushState, Step]):
             info={},
         )
 
-    def render(
-        self, state: PushState, width: int = 64, height: int = 64
-    ) -> jnp.ndarray:
+    def render(self, state: PushState, width: int = 64, height: int = 64) -> Array:
         return _render_pixels(
-            state, self._assembly, self._stroke_indices, self._pusher_idx, width, height
+            state, self.assembly, self._stroke_indices, self._pusher_idx, width, height
         )
