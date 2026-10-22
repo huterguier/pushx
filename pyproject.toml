@@ -7,15 +7,14 @@ name = "pushx"
 version = "0.2.0"
 description = "PushT-style manipulation environments in JAX."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 license = "MIT"
 authors = [
   { name = "huterguier", email = "huterguier@gmail.com" }
 ]
 dependencies = [
     "jax",
-    "chex",
-    "gxm@git+https://github.com/huterguier/gxm@main",
+    "gxm@git+https://github.com/huterguier/gxm",
     "matplotlib",
     "jax2d",
 ]
