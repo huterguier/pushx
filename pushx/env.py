@@ -5,7 +5,7 @@ from gxm import Environment, Timestep
 from gxm.typing import Key
 
 from pushx import rewards, termination
-from pushx.dynamics import PushDynamics, PushState
+from pushx.dynamics import WALL_HI, WALL_LO, PushDynamics, PushState
 from pushx.rewards import RewardFn
 from pushx.shapes import Assembly
 from pushx.termination import SuccessFn
@@ -41,6 +41,13 @@ class PushEnv(Environment[PushState]):
     def success(self, state: PushState) -> jnp.ndarray:
         return self._success_fn(self, state)
 
+    def out_of_bounds(self, state: PushState) -> jnp.ndarray:
+        """Whether any stroke's center has left the arena, or gone NaN. The fixated pusher
+        out-muscles the walls, so it can crush the assembly through one; past that point
+        the welds tear and jax2d eventually emits NaNs, so ``step`` truncates the episode here."""
+        pos = state.sim_state.polygon.position[jnp.array(self._dynamics._stroke_indices)]
+        return jnp.any((pos < WALL_LO) | (pos > WALL_HI) | jnp.isnan(pos))
+
     def pusher_position(self, state: PushState) -> jnp.ndarray:
         return state.sim_state.circle.position[self._dynamics._pusher_idx]
 
@@ -72,7 +79,7 @@ class PushEnv(Environment[PushState]):
             action=action,
             reward=reward,
             terminated=success,
-            truncated=jnp.bool_(False),
+            truncated=self.out_of_bounds(new_state),
             info={},
         )
 

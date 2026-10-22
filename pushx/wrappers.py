@@ -110,7 +110,9 @@ class ActionRepeat(EnvironmentWrapper[Any]):
     Reward is **summed** over the repeat, so episode returns keep the scale they
     had at 100 Hz. Everything else — ``terminated``, ``truncated``, ``next_obs``,
     ``info`` — comes from the final step, so success is judged once per control
-    step, on a state the agent actually observes.
+    step, on a state the agent actually observes. The exception is truncation: once
+    a substep truncates, the state is frozen and that substep's timestep is returned,
+    so an out-of-bounds block is never stepped further.
 
     Place this directly on ``PushEnv``, inside any action-space wrapper::
 
@@ -136,14 +138,17 @@ class ActionRepeat(EnvironmentWrapper[Any]):
 
     def step(self, key: Key, state: PushState, action: jnp.ndarray) -> tuple[PushState, Timestep]:
         def one(carry, step_key):
-            state, total = carry
-            state, timestep = self.wrapped.step(step_key, state, action)
-            return (state, total + timestep.reward), timestep
+            state, total, truncated = carry
+            next_state, timestep = self.wrapped.step(step_key, state, action)
+            state = jax.tree.map(lambda a, b: jnp.where(truncated, a, b), state, next_state)
+            total = total + jnp.where(truncated, 0.0, timestep.reward)
+            return (state, total, truncated | timestep.truncated), timestep
 
-        (state, total), timesteps = jax.lax.scan(
-            one, (state, jnp.zeros(())), jax.random.split(key, self.repeat)
+        (state, total, truncated), timesteps = jax.lax.scan(
+            one, (state, jnp.zeros(()), jnp.array(False)), jax.random.split(key, self.repeat)
         )
-        last = jax.tree.map(lambda x: x[-1], timesteps)
+        last = jnp.where(truncated, jnp.argmax(timesteps.truncated), self.repeat - 1)
+        last = jax.tree.map(lambda x: x[last], timesteps)
         return state, dataclasses.replace(last, reward=total.astype(last.reward.dtype))
 
 
@@ -190,8 +195,8 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
     near-goal dynamics. Success never terminates: it is reported in
     ``info["success"]`` and ``terminated`` is always False. Instead the episode
     truncates — and, like ``gxm.wrappers.TimeLimit``, resets itself — ``linger``
-    steps after success is first reached, or at ``time_limit`` steps, whichever
-    comes first. The linger countdown starts at the first success and does not
+    steps after success is first reached, at ``time_limit`` steps, or when the
+    wrapped env truncates (e.g. out of bounds), whichever comes first. The linger countdown starts at the first success and does not
     restart if the assembly leaves and re-enters the goal region.
 
     ``time_limit`` and ``linger`` may each be an int (fixed), a ``(low, high)``
@@ -257,7 +262,7 @@ class LingerReset(EnvironmentWrapper[LingerResetState]):
         started = state.started | success
         linger = jnp.where(started, state.linger - 1, state.linger)
         steps = state.steps + 1
-        expired = (steps >= state.limit) | (started & (linger <= 0))
+        expired = timestep.truncated | (steps >= state.limit) | (started & (linger <= 0))
 
         step_state = LingerResetState(
             wrapped_state=wrapped_state,

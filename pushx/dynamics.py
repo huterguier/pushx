@@ -172,6 +172,23 @@ class PushDynamics(Dynamics[PushState, Step]):
         pusher_pos = sim_state.circle.position[self._pusher_idx]
         return jnp.concatenate([root_pos, assembly_angle[None], pusher_pos, goal_pos, goal_angle[None]])
 
+    def _rigidify(self, position: jnp.ndarray, rotation: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        # PushT's block is a single rigid body carrying several shapes; here it is
+        # several bodies held by jax2d's soft fixed joints, which the fixated pusher
+        # can tear apart by crushing the block into a wall -- after which the solver
+        # diverges to NaN. Snap the strokes back onto their mean rigid pose every step
+        # (strokes have equal mass, so the plain mean preserves the center of mass).
+        idx = jnp.array(self._stroke_indices)
+        offsets = jnp.array([s.offset for s in self._assembly.strokes])
+        angles = jnp.array([s.angle for s in self._assembly.strokes])
+        estimates = rotation[idx] - angles
+        spread = (estimates - estimates[0] + jnp.pi) % (2 * jnp.pi) - jnp.pi
+        angle = estimates[0] + jnp.mean(spread)
+        cos, sin = jnp.cos(angle), jnp.sin(angle)
+        world_offsets = offsets @ jnp.array([[cos, -sin], [sin, cos]]).T
+        origin = jnp.mean(position[idx] - world_offsets, axis=0)
+        return position.at[idx].set(origin + world_offsets), rotation.at[idx].set(angle + angles)
+
     def _randomise(self, key: Key) -> SimState:
         key_pos, key_angle, key_pusher = jax.random.split(key, 3)
 
@@ -270,7 +287,10 @@ class PushDynamics(Dynamics[PushState, Step]):
         # This replaced a 0.736 per-step retention, which let the block carry momentum
         # between steps and was the larger half of pushx pushing the block ~1.2x
         # further per contact than PushT does.
+        position, rotation = self._rigidify(new_sim.polygon.position, new_sim.polygon.rotation)
         poly = new_sim.polygon.replace(
+            position=position,
+            rotation=rotation,
             velocity=jnp.zeros_like(new_sim.polygon.velocity),
             angular_velocity=jnp.zeros_like(new_sim.polygon.angular_velocity),
         )
